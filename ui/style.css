@@ -322,3 +322,17 @@ main.enter > *:nth-child(2) { animation-delay: .03s; }
 main.enter > *:nth-child(3) { animation-delay: .06s; }
 main.enter > *:nth-child(n+4) { animation-delay: .09s; }
 @keyframes enter { from { opacity: 0; transform: translateY(6px); } }
+
+/* ---------------------------------------------------------------- categoria do cartão */
+.plastic .p-kind { display: block; font-size: 11.5px; font-weight: 600; opacity: .8; letter-spacing: .01em; margin-top: 2px; text-shadow: none; }
+.plastic.tier-gold { color: #3b2a06; background: linear-gradient(135deg, #f6e3a4 0%, #d9b45a 45%, #b8892e 100%); box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 18px 34px -20px #8a6418; }
+.plastic.tier-platinum { color: #23292b; background: linear-gradient(135deg, #f1f3f4 0%, #c7cdd1 50%, #9aa3a8 100%); box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 18px 34px -20px #5c6569; }
+.plastic.tier-black, .plastic.tier-nanquim { background: linear-gradient(140deg, #2b2d2e 0%, #0d0e0f 100%); box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 18px 34px -20px #000; }
+.plastic.tier-infinite { background: linear-gradient(140deg, #23324d 0%, #0b1220 100%); box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 18px 34px -20px #0b1220; }
+.plastic.tier-signature { background: linear-gradient(140deg, #5a2a3a 0%, #2a1119 100%); box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 18px 34px -20px #2a1119; }
+.plastic.tier-grafite { background: linear-gradient(140deg, #5d6266 0%, #2f3336 100%); box-shadow: 0 1px 0 rgba(255,255,255,.14) inset, 0 18px 34px -20px #222; }
+.plastic.tier-ultravioleta { background: linear-gradient(140deg, #6b2bd1 0%, #2a0b5e 100%); box-shadow: 0 1px 0 rgba(255,255,255,.14) inset, 0 18px 34px -20px #2a0b5e; }
+.plastic.tier-gold .limit, .plastic.tier-platinum .limit { background: rgba(0,0,0,.14); }
+.plastic.tier-gold .limit i, .plastic.tier-platinum .limit i { background: currentColor; }
+.plastic.tier-gold .p-name, .plastic.tier-platinum .p-name { text-shadow: none; }
+.plastic.tier-gold .p-flag, .plastic.tier-platinum .p-flag { background: rgba(0,0,0,.12); color: inherit; }

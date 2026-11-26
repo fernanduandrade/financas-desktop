@@ -176,12 +176,18 @@ function heroMoney(c) {
   const int = Math.floor(v / 100).toLocaleString('pt-BR'), cents = String(v % 100).padStart(2, '0');
   return `${neg ? '−' : ''}<span class="cur">R$</span>${int}<span class="cents">,${cents}</span>`;
 }
+// bandeira e categoria do cartão: o visual do "plástico" segue a categoria (Gold, Platinum, Black…)
+const NETWORKS = ['Visa', 'Mastercard', 'Elo', 'American Express', 'Hipercard'];
+const TIERS = ['Internacional', 'Gold', 'Platinum', 'Black', 'Infinite', 'Signature', 'Nanquim', 'Grafite', 'Ultravioleta'];
+const tierCls = c => c.tier ? ' tier-' + norm(c.tier).replace(/[^a-z]/g, '') : '';
+const cardKind = c => [c.network, c.tier].filter(Boolean).join(' ');
+const graceTxt = (due, pay) => pay && pay !== due ? `pode pagar até ${D(pay).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '')}` : '';
 function plastic(c, closedInv) {
   const label = closedInv ? (closedInv.state === 'atrasada' ? 'Fatura atrasada' : 'Fatura fechada') : 'Fatura atual';
   const val = closedInv ? closedInv.total_cents : c.current_cents, due = closedInv ? closedInv.due : c.current_due;
   const used = c.limit_cents ? Math.min(100, Math.max(0, -c.open_cents / c.limit_cents * 100)) : 0;
-  return `<a class="plastic" href="#cartoes" onclick="S.card=${c.id};S.due=null" style="--c:${esc(c.color || '#334')}">
-    <div class="p-top"><span class="p-name">${esc(c.name)}</span><span class="chip"></span></div>
+  return `<a class="plastic${tierCls(c)}" href="#cartoes" onclick="S.card=${c.id};S.due=null" style="--c:${esc(c.color || '#334')}">
+    <div class="p-top"><span class="p-name">${esc(c.name)}${cardKind(c) ? `<small class="p-kind">${esc(cardKind(c))}</small>` : ''}</span><span class="chip"></span></div>
     <div class="p-mid"><span>${label}${closedInv ? ' <i class="p-flag">pagar</i>' : ''}</span><b>${money(Math.abs(val || 0))}</b></div>
     <div><div class="p-bot"><span>Vence <b>${brShort(due)}</b></span><span>Disponível <b>${money(c.available_cents)}</b></span></div>
     <div class="limit" title="${Math.round(used)}% do limite em uso"><i style="width:${used}%"></i></div></div></a>`;
@@ -281,7 +287,7 @@ async function pageInicio() {
           return `<div class="row up">
             ${ic}
             <div style="min-width:0"><div class="t">${esc(u.description)}</div>
-              <div class="s"><span class="${u.overdue ? 'neg' : ''}" style="font-weight:650">${u.overdue ? 'Venceu ' : ''}${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '')}</span><span>${esc(u.account)}</span>${u.overdue ? '<span class="pill late">atrasada</span>' : ''}${u.type === 'fatura' && u.state === 'fechada' ? '<span class="pill warn">fechada</span>' : ''}${u.type === 'fatura' && u.state === 'aberta' ? '<span class="pill info">aberta</span>' : ''}</div></div>
+              <div class="s"><span class="${u.overdue ? 'neg' : ''}" style="font-weight:650">${u.overdue ? 'Venceu ' : ''}${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '')}</span><span>${esc(u.account)}</span>${u.overdue ? '<span class="pill late">atrasada</span>' : ''}${u.type === 'fatura' && u.state === 'fechada' ? '<span class="pill warn">fechada</span>' : ''}${u.type === 'fatura' && u.state === 'aberta' ? '<span class="pill info">aberta</span>' : ''}${!u.overdue && u.grace_days ? `<span class="pill">${graceTxt(u.date, u.pay_until)}</span>` : ''}</div></div>
             <div class="money ${cls(u.amount_cents)}">${money(u.amount_cents)}</div>
             <div>${u.type === 'fatura'
               ? `<button class="btn sm" onclick="openPayInvoice(${u.card_id},'${u.date}',${u.amount_cents})">Pagar</button>`
@@ -566,12 +572,12 @@ async function pageCartoes() {
   const stPill = { paga: 'ok', atrasada: 'late', fechada: 'warn', aberta: 'info', futura: '' };
   $('#main').innerHTML = `
     <h1>Cartões</h1>
-    <div class="cardpick">${cards.map(c => `<button class="plastic mini ${c.id === card.id ? 'on' : 'off'}" style="--c:${esc(c.color || '#334')}" onclick="S.card=${c.id};S.due=null;refresh()"><div class="p-top"><span class="p-name">${esc(c.name)}</span><span class="chip"></span></div><div class="p-mid"><span>Disponível</span><b>${money(c.available_cents)}</b></div></button>`).join('')}
+    <div class="cardpick">${cards.map(c => `<button class="plastic mini${tierCls(c)} ${c.id === card.id ? 'on' : 'off'}" style="--c:${esc(c.color || '#334')}" onclick="S.card=${c.id};S.due=null;refresh()"><div class="p-top"><span class="p-name">${esc(c.name)}${cardKind(c) ? `<small class="p-kind">${esc(cardKind(c))}</small>` : ''}</span><span class="chip"></span></div><div class="p-mid"><span>Disponível</span><b>${money(c.available_cents)}</b></div></button>`).join('')}
       <button class="plastic mini add" onclick="openAccount({kind:'cartao'})">${I.plus} Novo cartão</button></div>
     <div class="inv-tabs">${shown.map(i => `<button class="${i.due === inv.due ? 'on' : ''}" onclick="S.due='${i.due}';refresh()">Vence ${cap(D(i.due).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''))}/${i.due.slice(2, 4)}<b class="${i.paid ? '' : 'neg'}">${money(i.total_cents)}</b><span class="pill ${stPill[i.state]}">${i.state}</span></button>`).join('')}</div>
     <div class="grid" style="grid-template-columns:minmax(0,2fr) minmax(270px,1fr);align-items:start">
       <div class="card"><div class="inv-head">
-          <div><div class="muted small" style="font-weight:600">Fatura com vencimento em ${br(inv.due)}, fecha em ${br(inv.closing)}</div><div class="big ${inv.paid ? '' : 'neg'}">${money(inv.total_cents)}</div></div>
+          <div><div class="muted small" style="font-weight:600">Fatura com vencimento em ${br(inv.due)}, fecha em ${br(inv.closing)}${!inv.paid && inv.grace_days ? `<br><span class="pill info" style="margin-top:6px">vence em fim de semana ou feriado: ${graceTxt(inv.due, inv.pay_until)} (+${inv.grace_days} dia${inv.grace_days > 1 ? 's' : ''})</span>` : ''}</div><div class="big ${inv.paid ? '' : 'neg'}">${money(inv.total_cents)}</div></div>
           <div>${inv.paid
             ? `<span class="pill ok">Paga${inv.paid_at ? ' em ' + br(inv.paid_at) : ''}</span> ${inv.total_cents < 0 ? `<button class="btn sm" onclick="unpayInvoice(${card.id},'${inv.due}')">Reabrir</button>` : ''}`
             : inv.total_cents < 0 ? `<button class="btn primary" onclick="openPayInvoice(${card.id},'${inv.due}',${inv.total_cents})">Pagar fatura</button>` : ''}</div></div>
@@ -580,7 +586,7 @@ async function pageCartoes() {
       <div class="card"><div class="panel-head"><h2>Limite</h2><span class="hint">${card.limit_cents ? Math.round(-card.open_cents / card.limit_cents * 100) : 0}% em uso</span></div>
         <div class="bar" style="height:10px;margin:0 0 16px"><i style="width:${card.limit_cents ? Math.min(100, -card.open_cents / card.limit_cents * 100) : 0}%;background:${esc(card.color || 'var(--em-600)')}"></i></div>
         <dl class="kv"><dt>Limite</dt><dd>${money(card.limit_cents)}</dd><dt>Em uso</dt><dd class="neg">${money(card.open_cents)}</dd><dt>Disponível</dt><dd>${money(card.available_cents)}</dd>
-        <dt>Fecha no dia</dt><dd>${card.closing_day}</dd><dt>Vence no dia</dt><dd>${card.due_day}</dd><dt>Paga pela conta</dt><dd>${esc(acc(card.payment_account_id)?.name || '—')}</dd></dl>
+        ${cardKind(card) ? `<dt>Cartão</dt><dd>${esc(cardKind(card))}</dd>` : ''}<dt>Fecha no dia</dt><dd>${card.closing_day}</dd><dt>Vence no dia</dt><dd>${card.due_day}</dd><dt>Paga pela conta</dt><dd>${esc(acc(card.payment_account_id)?.name || '—')}</dd></dl>
         <div style="margin-top:14px;display:flex;gap:8px"><button class="btn sm" onclick="openAccount(acc(${card.id}))">${I.edit}Editar cartão</button></div>
         <p class="muted small" style="margin-bottom:0">Compras feitas até o dia ${card.closing_day} entram na fatura que fecha nesse dia; depois disso, vão para a próxima.</p>
       </div>
@@ -757,6 +763,8 @@ async function pageConfig() {
           <div class="opt"><label class="switch"><input type="checkbox" name="lembrete_diario_ativo" ${st.lembrete_diario_ativo === '1' ? 'checked' : ''}><i></i></label><div class="txt"><b>Lembrete diário</b><span>Pergunta se você já lançou os gastos do dia.</span></div><input type="time" name="lembrete_diario" value="${esc(st.lembrete_diario)}"></div>
           <div class="opt"><span class="switch" style="visibility:hidden"></span><div class="txt"><b>Contas a vencer</b><span>Avisa uma vez por dia o que vence nos próximos
             <select name="aviso_contas_dias" style="width:auto;padding:2px 26px 2px 8px;margin:0 2px">${[0, 1, 2, 3, 5, 7].map(n => `<option value="${n}" ${+st.aviso_contas_dias === n ? 'selected' : ''}>${n}</option>`).join('')}</select> dias.</span></div><input type="time" name="aviso_contas_hora" value="${esc(st.aviso_contas_hora)}"></div>
+          <div class="opt"><label class="switch"><input type="checkbox" name="aviso_fechamento_ativo" ${st.aviso_fechamento_ativo !== '0' ? 'checked' : ''}><i></i></label><div class="txt"><b>Fechamento das faturas</b><span>Avisa
+            <select name="aviso_fechamento_dias" style="width:auto;padding:2px 26px 2px 8px;margin:0 2px">${[0, 1, 2, 3].map(n => `<option value="${n}" ${+(st.aviso_fechamento_dias ?? 1) === n ? 'selected' : ''}>${n}</option>`).join('')}</select> dia(s) antes de cada cartão fechar e quando a fatura fecha, com o valor e o último dia para pagar sem juros (se o vencimento cair em fim de semana ou feriado, conta a folga).</span></div></div>
           <div class="opt"><label class="switch"><input type="checkbox" name="revisao_semanal_ativo" ${st.revisao_semanal_ativo === '1' ? 'checked' : ''}><i></i></label><div class="txt"><b>Revisão de domingo</b><span>Resumo da semana: saldo, faturas e gastos do mês.</span></div><input type="time" name="revisao_semanal_hora" value="${esc(st.revisao_semanal_hora)}"></div>
           <h2 style="margin:18px 0 4px">Como o aviso aparece</h2>
           <div class="opt"><span class="switch" style="visibility:hidden"></span><div class="txt"><b>Estilo</b><span>O aviso do Finanças tem botões como "Lançar agora" e "Mais tarde".</span></div>
@@ -784,6 +792,7 @@ async function pageConfig() {
     const f = e.target, d = Object.fromEntries(new FormData(f));
     d.lembrete_diario_ativo = f.elements.lembrete_diario_ativo.checked ? '1' : '0';
     d.revisao_semanal_ativo = f.elements.revisao_semanal_ativo.checked ? '1' : '0';
+    d.aviso_fechamento_ativo = f.elements.aviso_fechamento_ativo.checked ? '1' : '0';
     d.tremer_tela = f.elements.tremer_tela.checked ? '1' : '0';
     d.som_aviso = f.elements.som_aviso.checked ? '1' : '0';
     if (f.elements.iniciar_com_sistema) d.iniciar_com_sistema = f.elements.iniciar_com_sistema.checked ? '1' : '0';
@@ -828,7 +837,9 @@ function openAccount(a) {
         <label class="field">Limite<input name="limite" inputmode="decimal" value="${a.limit_cents ? moneyInput(a.limit_cents) : ''}"></label>
         <label class="field">Paga pela conta<select name="payment_account_id">${accOptions(activeAccounts('conta'), a.payment_account_id)}</select></label>
         <label class="field">Dia de fechamento<input type="number" min="1" max="31" name="closing_day" required value="${a.closing_day || ''}"></label>
-        <label class="field">Dia de vencimento<input type="number" min="1" max="31" name="due_day" required value="${a.due_day || ''}"></label>`
+        <label class="field">Dia de vencimento<input type="number" min="1" max="31" name="due_day" required value="${a.due_day || ''}"></label>
+        <label class="field">Bandeira<select name="network"><option value="">Não informar</option>${NETWORKS.map(n => `<option ${a.network === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="field">Categoria<select name="tier"><option value="">Não informar</option>${TIERS.map(n => `<option ${a.tier === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`
       : `<label class="field full">Saldo atual<input name="saldo" inputmode="decimal" value="${editing ? (a.balance_cents < 0 ? '-' : '') + moneyInput(a.balance_cents) : '0,00'}"><span class="small">Alterar aqui ajusta o saldo inicial para a conta mostrar esse valor hoje.</span></label>`}
       <label class="field">Cor<input type="color" name="color" value="${esc(a.color || '#0f6e56')}"></label>
     </div>
@@ -841,7 +852,7 @@ function openAccount(a) {
       if (act !== 'save') return;
       const fd = Object.fromEntries(new FormData(f));
       const body = { name: fd.name, kind: a.kind, color: fd.color, archived: a.archived ? 1 : 0 };
-      if (isCard) Object.assign(body, { limit_cents: parseMoney(fd.limite) || 0, closing_day: +fd.closing_day, due_day: +fd.due_day, payment_account_id: +fd.payment_account_id || null });
+      if (isCard) Object.assign(body, { limit_cents: parseMoney(fd.limite) || 0, closing_day: +fd.closing_day, due_day: +fd.due_day, payment_account_id: +fd.payment_account_id || null, network: fd.network || null, tier: fd.tier || null });
       else { const v = parseMoney(fd.saldo); if (!isNaN(v)) body.balance_cents = v; }
       await api(editing ? 'PUT' : 'POST', editing ? `accounts/${a.id}` : 'accounts', body);
       toast('Salvo'); refresh();

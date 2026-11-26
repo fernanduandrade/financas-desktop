@@ -3,15 +3,18 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 py, rs = json.load(open("out_py.json")), json.load(open("out_rs.json"))
 steps = json.load(open("scenario.json"))
 HEX = re.compile(r"^[0-9a-f]{32}$")
+NOVAS = {"aviso_fechamento_ativo", "aviso_fechamento_dias"}  # configurações novas da v2
 def norm(v, ids):
     if isinstance(v, dict):
         out = {}
         for k, x in v.items():
-            if k in ("exported_at", "data_dir"): continue
+            if k in NOVAS: continue
+            if isinstance(x, dict) and x.get("key") in NOVAS: continue
+            if k in ("exported_at", "data_dir", "pay_until", "grace_days", "network", "tier"): continue  # campos novos da v2
             if k == "created_at" and x != "2026-11-01 00:00:00": x = "<agora>"
             out[k] = norm(x, ids)
         return out
-    if isinstance(v, list): return [norm(x, ids) for x in v]
+    if isinstance(v, list): return [norm(x, ids) for x in v if not (isinstance(x, dict) and x.get("key") in NOVAS)]
     if isinstance(v, str) and HEX.match(v):
         return ids.setdefault(v, f"<uuid{len(ids)}>")
     return v

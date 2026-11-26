@@ -82,6 +82,8 @@ pub const DEFAULT_SETTINGS: &[(&str, &str)] = &[
     ("tremer_tela", "1"),
     ("tremor_intensidade", "medio"),
     ("som_aviso", "1"),
+    ("aviso_fechamento_ativo", "1"),
+    ("aviso_fechamento_dias", "1"),
     ("ntfy_topico", ""),
     ("ntfy_servidor", "https://ntfy.sh"),
     ("porta", "8765"),
@@ -271,6 +273,16 @@ impl Db {
             .map_err(e)?;
         conn.execute_batch("PRAGMA foreign_keys=OFF;").map_err(e)?;
         conn.execute_batch(SCHEMA).map_err(e)?;
+        // migração v2: bandeira e categoria do cartão (Visa Platinum, Mastercard Black…)
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(accounts)")
+            .and_then(|mut st| st.query_map([], |r| r.get::<_, String>(1))?.collect())
+            .map_err(e)?;
+        for c in ["network", "tier"] {
+            if !cols.iter().any(|x| x == c) {
+                conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {c} TEXT")).map_err(e)?;
+            }
+        }
         for (k, v) in DEFAULT_SETTINGS {
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",
@@ -484,6 +496,8 @@ impl Db {
             "color",
             "archived",
             "sort",
+            "network",
+            "tier",
         ];
         let mut vals = Obj::new();
         for k in FIELDS {
@@ -672,6 +686,7 @@ impl Db {
                 "payment_tx_id".into(),
                 st.get("payment_tx_id").cloned().unwrap_or(Value::Null),
             );
+            add_grace(&mut o, d);
             out.push(o);
         }
         Ok(out)
@@ -1235,6 +1250,8 @@ impl Db {
             let overdue = str_of(&r, "date") < ts;
             r.insert("type".into(), json!("lancamento"));
             r.insert("overdue".into(), json!(overdue));
+            let d = parse(&str_of(&r, "date"))?;
+            add_grace(&mut r, d);
             items.push(r);
         }
         for card in self.rows(
@@ -1261,6 +1278,7 @@ impl Db {
                         "color".into(),
                         card.get("color").cloned().unwrap_or(Value::Null),
                     );
+                    add_grace(&mut o, parse(&due)?);
                     items.push(o);
                 }
             }
@@ -1485,6 +1503,14 @@ impl Db {
         }
         Ok(false)
     }
+}
+
+/// Vencimento em fim de semana ou feriado: o pagamento sem juros vale até o próximo dia útil.
+/// Acrescenta `pay_until` (data) e `grace_days` (dias de folga, 0 se já é dia útil).
+fn add_grace(o: &mut Obj, due: NaiveDate) {
+    let pay = next_business_day(due);
+    o.insert("pay_until".into(), json!(iso(pay)));
+    o.insert("grace_days".into(), json!((pay - due).num_days()));
 }
 
 pub fn objs(v: Vec<Obj>) -> Value {

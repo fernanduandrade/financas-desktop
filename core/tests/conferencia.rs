@@ -181,3 +181,29 @@ fn apagar_tudo_faz_backup_e_mantem_configuracoes() {
     api::route(&db, "POST", "backup", Some(exp)).unwrap();
     assert_eq!(api::route(&db, "GET", "summary", None).unwrap()["balance_cents"], 10000);
 }
+
+#[test]
+fn aviso_de_fechamento_das_faturas() {
+    let Some((db, _)) = db_hoje() else { return };
+    let state = db.data_dir.join("lembretes.json");
+    let n = financas_core::reminders::closing_notice(&db, &state, 1, false).unwrap().expect("aviso");
+    println!("{}\n{}", n.title, n.message);
+    assert!(n.message.contains("Nubank fecha hoje (25/11)"));
+    assert!(n.message.contains("Magazine - Itáu fecha amanhã (26/11)"));
+    assert!(n.message.contains("Itaú Platium - Visa fechou em R$ 3.384,92. Vence terça, 01/12."));
+    // não repete
+    assert!(financas_core::reminders::closing_notice(&db, &state, 1, false).unwrap().is_none());
+}
+
+#[test]
+fn folga_no_vencimento() {
+    let db = db_vazio();
+    // cartão que vence dia 5: em dezembro/2026 cai num sábado
+    api::route(&db, "POST", "accounts", Some(json!({"name": "Conta", "kind": "conta", "balance_cents": 0}))).unwrap();
+    let c = api::route(&db, "POST", "accounts", Some(json!({"name": "Cartão", "kind": "cartao", "closing_day": 27, "due_day": 5, "limit_cents": 100000}))).unwrap()["id"].clone();
+    api::route(&db, "POST", "transactions", Some(json!({"description": "x", "amount_cents": -1000, "date": "2026-11-20", "account_id": c}))).unwrap();
+    let inv = api::route(&db, "GET", &format!("invoices?card={c}"), None).unwrap();
+    let i = inv["invoices"].as_array().unwrap().iter().find(|i| i["due"] == "2026-12-05").unwrap();
+    assert_eq!(i["pay_until"], "2026-12-07");
+    assert_eq!(i["grace_days"], 2);
+}

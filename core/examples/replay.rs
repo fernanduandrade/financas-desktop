@@ -24,6 +24,10 @@ fn main() {
     let seed_path = args.get(3).cloned().unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/dados/dados_iniciais.json").into());
     let seed: Map<String, Value> = serde_json::from_str(&std::fs::read_to_string(&seed_path).expect("dados iniciais")).unwrap();
     db.first_run_import(&seed).unwrap();
+    // a versão Python não tinha o aviso de fechamento das faturas
+    let mut off = Map::new();
+    off.insert("aviso_fechamento_ativo".into(), json!("0"));
+    db.save_settings(&off).unwrap();
 
     let steps: Vec<Value> =
         serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();

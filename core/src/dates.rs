@@ -89,6 +89,100 @@ pub fn brl(cents: i64) -> String {
     )
 }
 
+// ------------------------------------------------------------------ dias úteis e feriados
+
+/// Domingo de Páscoa (algoritmo de Meeus/Jones/Butcher, calendário gregoriano).
+pub fn easter(y: i32) -> NaiveDate {
+    let a = y % 19;
+    let b = y / 100;
+    let c = y % 100;
+    let d = b / 4;
+    let e = b % 4;
+    let f = (b + 8) / 25;
+    let g = (b - f + 1) / 3;
+    let h = (19 * a + b - d - g + 15) % 30;
+    let i = c / 4;
+    let k = c % 4;
+    let l = (32 + 2 * e + 2 * i - h - k) % 7;
+    let m = (a + 11 * h + 22 * l) / 451;
+    let month = (h + l - 7 * m + 114) / 31;
+    let day = (h + l - 7 * m + 114) % 31 + 1;
+    NaiveDate::from_ymd_opt(y, month as u32, day as u32).unwrap()
+}
+
+/// Feriados nacionais em que os bancos não funcionam (inclui Carnaval e Corpus Christi,
+/// que são ponto facultativo mas sem expediente bancário).
+pub fn bank_holidays(y: i32) -> Vec<(NaiveDate, &'static str)> {
+    let fixed = |m: u32, d: u32| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+    let e = easter(y);
+    let mut v = vec![
+        (fixed(1, 1), "Confraternização Universal"),
+        (e - chrono::Duration::days(48), "Carnaval"),
+        (e - chrono::Duration::days(47), "Carnaval"),
+        (e - chrono::Duration::days(2), "Sexta-feira Santa"),
+        (fixed(4, 21), "Tiradentes"),
+        (fixed(5, 1), "Dia do Trabalho"),
+        (e + chrono::Duration::days(60), "Corpus Christi"),
+        (fixed(9, 7), "Independência"),
+        (fixed(10, 12), "Nossa Senhora Aparecida"),
+        (fixed(11, 2), "Finados"),
+        (fixed(11, 15), "Proclamação da República"),
+        (fixed(12, 25), "Natal"),
+    ];
+    if y >= 2024 {
+        v.push((fixed(11, 20), "Consciência Negra"));
+    }
+    v.sort();
+    v
+}
+
+pub fn holiday_name(d: NaiveDate) -> Option<&'static str> {
+    bank_holidays(d.year()).into_iter().find(|(h, _)| *h == d).map(|(_, n)| n)
+}
+
+pub fn is_business_day(d: NaiveDate) -> bool {
+    !matches!(d.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) && holiday_name(d).is_none()
+}
+
+/// Quando o vencimento cai em fim de semana ou feriado, o pagamento sem juros vale até o
+/// próximo dia útil.
+pub fn next_business_day(d: NaiveDate) -> NaiveDate {
+    let mut x = d;
+    while !is_business_day(x) {
+        x = x.succ_opt().unwrap();
+    }
+    x
+}
+
+pub fn weekday_pt(d: NaiveDate) -> &'static str {
+    ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"][d.weekday().num_days_from_monday() as usize]
+}
+
+/// Por que a data não é dia útil: "sábado", "domingo" ou o nome do feriado.
+pub fn non_business_reason(d: NaiveDate) -> Option<String> {
+    if let Some(n) = holiday_name(d) {
+        return Some(format!("feriado de {n}"));
+    }
+    match d.weekday() {
+        chrono::Weekday::Sat | chrono::Weekday::Sun => Some(weekday_pt(d).to_string()),
+        _ => None,
+    }
+}
+
+/// Texto de folga para um vencimento, ou None se ele já cai em dia útil.
+/// Ex.: "cai no sábado: dá para pagar até segunda, 07/12, sem juros (+2 dias)".
+pub fn grace_text(due: NaiveDate) -> Option<String> {
+    let reason = non_business_reason(due)?;
+    let pay = next_business_day(due);
+    let days = (pay - due).num_days();
+    Some(format!(
+        "cai no {reason}: dá para pagar até {}, {}, sem juros (+{days} dia{})",
+        weekday_pt(pay),
+        pay.format("%d/%m"),
+        if days > 1 { "s" } else { "" }
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +202,28 @@ mod tests {
         assert_eq!(invoice_due_for(d("2027-01-20"), 20, 31), d("2027-01-31"));
         assert_eq!(invoice_due_for(d("2027-01-21"), 20, 31), d("2027-02-28"));
         assert_eq!(closing_date_for(d("2026-12-02"), 25, 2), d("2026-11-25"));
+    }
+
+    #[test]
+    fn feriados_e_dias_uteis() {
+        assert_eq!(easter(2026), d("2026-04-05"));
+        assert_eq!(easter(2027), d("2027-03-28"));
+        assert_eq!(holiday_name(d("2026-02-16")), Some("Carnaval"));
+        assert_eq!(holiday_name(d("2026-04-03")), Some("Sexta-feira Santa"));
+        assert_eq!(holiday_name(d("2026-06-04")), Some("Corpus Christi"));
+        assert_eq!(next_business_day(d("2026-12-05")), d("2026-12-07")); // sábado → segunda
+        assert_eq!(next_business_day(d("2026-12-25")), d("2026-12-28")); // Natal (sexta) → segunda
+        assert_eq!(next_business_day(d("2026-11-20")), d("2026-11-23")); // Consciência Negra (sexta)
+        assert_eq!(next_business_day(d("2026-12-02")), d("2026-12-02"));
+        assert_eq!(grace_text(d("2026-12-02")), None);
+        assert_eq!(
+            grace_text(d("2026-12-05")).unwrap(),
+            "cai no sábado: dá para pagar até segunda, 07/12, sem juros (+2 dias)"
+        );
+        assert_eq!(
+            grace_text(d("2026-12-25")).unwrap(),
+            "cai no feriado de Natal: dá para pagar até segunda, 28/12, sem juros (+3 dias)"
+        );
     }
 
     #[test]
