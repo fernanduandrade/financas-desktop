@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Finanças</title>
+<link rel="stylesheet" href="/mini.css">
+<style>
+  .card { width: 320px; opacity: 0; transform: translateY(8px) scale(.985); transition: opacity .16s ease-out, transform .2s cubic-bezier(.2,.7,.2,1); }
+  body.top .card { transform: translateY(-8px) scale(.985); }
+  body.show .card { opacity: 1; transform: none; }
+  .band { padding: 16px 18px 16px; }
+  .band .row { display: flex; justify-content: space-between; align-items: center; }
+  .band .date { font-size: 12.5px; color: rgba(241,251,246,.78); font-weight: 550; }
+  .band .label { font-size: 12.5px; color: rgba(241,251,246,.8); font-weight: 600; margin-top: 16px; }
+  .band .value { font-size: 32px; font-weight: 780; letter-spacing: -.03em; line-height: 1.1; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+  .band .value .cur { font-size: .48em; font-weight: 650; letter-spacing: 0; margin-right: 5px; opacity: .85; vertical-align: .55em; }
+  .band .value .cents { font-size: .52em; font-weight: 700; opacity: .9; }
+  .band .foot { font-size: 12.5px; color: rgba(241,251,246,.78); }
+  .band .foot b { color: #fff; }
+  .info { padding: 8px 18px 10px; }
+  .info .r { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 0; }
+  .info .r span { color: var(--muted); }
+  .info .r b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+  .info .r b small { color: var(--faint); font-weight: 600; margin-right: 6px; }
+  .amber { color: var(--amber); } .ok { color: var(--em-700); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  .menu { padding: 6px 0; }
+  .menu button { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: transparent; font: inherit; font-weight: 650; color: var(--ink); padding: 9px 18px; text-align: left; cursor: pointer; }
+  .menu button:hover, .menu button:focus-visible { background: var(--surface-2); outline: none; }
+  .menu button svg { color: var(--em-700); }
+  .menu button kbd { margin-left: auto; font: inherit; font-size: 11.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+  .menu button.quiet, .menu button.quiet svg { color: var(--muted); }
+  .menu hr { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="card" id="card"></div>
+<script src="/panel.js"></script>
+</body>
+</html>

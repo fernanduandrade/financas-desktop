@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Finanças</title>
+<link rel="stylesheet" href="/mini.css">
+<style>
+  .card { width: 368px; --k: var(--em-600); transform: translateX(calc(100% + 24px)); opacity: 0; }
+  .card.in { animation: slide .28s cubic-bezier(.16, .84, .3, 1) forwards; }
+  .card.out { animation: leave .2s ease-in forwards; }
+  .card.wiggle { animation: slide .28s cubic-bezier(.16, .84, .3, 1) forwards, wiggle .34s .3s linear; }
+  @keyframes slide { to { transform: none; opacity: 1; } }
+  @keyframes leave { from { transform: none; opacity: 1; } to { transform: translateX(40px); opacity: 0; } }
+  @keyframes wiggle {
+    0%, 100% { transform: none; } 12% { transform: translateX(-9px); } 25% { transform: translateX(8px); }
+    38% { transform: translateX(-6px); } 52% { transform: translateX(5px); } 66% { transform: translateX(-3px); } 80% { transform: translateX(2px); }
+  }
+  .band { padding: 10px 12px 10px 16px; display: flex; align-items: center; justify-content: space-between; background-position: right 56px center, 0 0; background-size: auto 230%, auto; }
+  .band .when { color: rgba(241,251,246,.7); font-weight: 550; margin-left: 2px; }
+  .x { border: 0; background: transparent; color: rgba(241,251,246,.8); width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; position: relative; z-index: 1; }
+  .x:hover { background: rgba(255,255,255,.14); color: #fff; }
+  .x svg { width: 16px; height: 16px; }
+  .body { display: flex; gap: 13px; padding: 15px 16px 4px; }
+  .ico { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; flex: none;
+    background: color-mix(in srgb, var(--k) 14%, #fff); color: color-mix(in srgb, var(--k) 85%, #000); }
+  .ico svg { width: 21px; height: 21px; }
+  .title { font-weight: 750; font-size: 15px; letter-spacing: -.01em; margin-top: 1px; }
+  .msg { color: var(--muted); margin-top: 3px; white-space: pre-line; font-size: 13.5px; }
+  .acts { display: flex; gap: 8px; padding: 14px 16px 16px; }
+  .acts button { flex: 1; font: inherit; font-weight: 700; font-size: 13.5px; padding: 9px 12px; border-radius: 11px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink); transition: background .12s, border-color .12s; }
+  .acts button:hover { background: var(--surface-2); border-color: #c9d5cf; }
+  .acts button.primary { background: linear-gradient(180deg, var(--em-600), var(--em-700)); border-color: var(--em-700); color: #fff;
+    box-shadow: 0 6px 14px -8px rgba(10,106,79,.8), inset 0 1px 0 rgba(255,255,255,.18); }
+  .acts button.primary:hover { background: linear-gradient(180deg, var(--em-500), var(--em-600)); }
+  .bar { height: 3px; background: color-mix(in srgb, var(--k) 12%, #fff); }
+  .bar i { display: block; height: 100%; width: 100%; background: var(--k); transform-origin: left; }
+</style>
+</head>
+<body>
+<div class="card" id="card"></div>
+<script src="/toast.js"></script>
+</body>
+</html>

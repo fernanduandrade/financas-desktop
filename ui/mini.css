@@ -1,0 +1,24 @@
+/* Finanças: base comum do painel da bandeja e dos avisos (mesmo visual "claro refinado" do app) */
+@font-face { font-family: "Manrope"; src: url("/fonts/manrope.woff2") format("woff2"); font-weight: 200 800; font-display: block; }
+:root {
+  --paper: #eef3f0; --surface: #ffffff; --surface-2: #f3f7f5; --ink: #13201a; --muted: #5d6b64; --faint: #98a49e; --line: #e2e9e5;
+  --em-950: #032e22; --em-900: #054331; --em-700: #0a6a4f; --em-600: #0d7f5e; --em-500: #14a37a; --mint: #dcf2e9;
+  --red: #c0392b; --amber: #95600a; --blue: #2457a6;
+  font-family: "Manrope", "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.4; color: var(--ink);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; cursor: default; }
+body { padding: 12px; -webkit-font-smoothing: antialiased; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.card { background: var(--surface); border-radius: 18px; overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(19, 48, 36, .08), 0 2px 4px rgba(19, 48, 36, .06), 0 14px 28px -14px rgba(3, 46, 34, .45); }
+/* a faixa da cédula: degradê esmeralda + guilloché, igual à do app */
+.band { position: relative; color: #f1fbf6;
+  background: url("/guilloche.svg") right center / auto 150% no-repeat,
+              radial-gradient(120% 160% at 0% 0%, #0f8a64 0%, var(--em-700) 40%, var(--em-900) 80%, var(--em-950) 100%); }
+.band::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,.18); pointer-events: none; }
+.brandline { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; }
+.brandline img { width: 18px; height: 18px; border-radius: 5px; }
+.money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.neg { color: var(--red); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
