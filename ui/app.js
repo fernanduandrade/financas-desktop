@@ -705,7 +705,8 @@ async function pageRel() {
     <div class="grid split">
       <div class="card"><div class="panel-head"><h2>Receitas e despesas, 6 meses</h2><div class="legend"><span><i class="dot" style="background:var(--em-500)"></i>Receitas</span><span><i class="dot" style="background:#d24b3c"></i>Despesas</span></div></div>
         <div class="chart"><div class="axis">${ticks.map(t => `<span>${short(t)}</span>`).join('')}</div>
-          <div class="plot">${months.map(m => { const v = agg[key(m)]; return `<div class="col ${key(m) === curK ? 'cur' : ''}" title="${monthLabel(m)}: receitas ${money(v.inc)}, despesas ${money(v.exp)}"><div class="bars"><i class="inc" style="height:${v.inc / top * 100}%"></i><i class="exp" style="height:${-v.exp / top * 100}%"></i></div><span class="lbl">${m.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</span></div>`; }).join('')}</div></div>
+          <div class="plot">${months.map((m, i) => { const v = agg[key(m)]; return `<div class="col ${key(m) === curK ? 'cur' : ''} ${i < 2 ? 'tip-r' : i > 3 ? 'tip-l' : ''}" tabindex="0" data-m="${iso(m)}" aria-label="${monthLabel(m)}: receitas ${money(v.inc)}, despesas ${money(v.exp)}"><div class="bars"><i class="inc" style="height:${v.inc / top * 100}%"></i><i class="exp" style="height:${-v.exp / top * 100}%"></i></div><span class="lbl">${m.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</span>
+            <div class="tip" role="tooltip"><b>${monthLabel(m)}</b><span><i class="dot" style="background:var(--em-500)"></i>Receitas<em class="pos">${money(v.inc)}</em></span><span><i class="dot" style="background:#d24b3c"></i>Despesas<em class="neg">${money(v.exp)}</em></span><span class="res">Resultado<em class="${cls(v.inc + v.exp)}">${money(v.inc + v.exp)}</em></span>${key(m) === curK ? '' : '<small>Clique para ver este mês</small>'}</div></div>`; }).join('')}</div></div>
         <table style="margin-top:22px"><thead><tr><th>Mês</th><th class="money">Receitas</th><th class="money">Despesas</th><th class="money">Resultado</th></tr></thead><tbody>
           ${months.map(m => { const v = agg[key(m)]; return `<tr><td style="font-weight:600">${monthLabel(m)}</td><td class="money pos">${money(v.inc)}</td><td class="money neg">${money(v.exp)}</td><td class="money ${cls(v.inc + v.exp)}">${money(v.inc + v.exp)}</td></tr>`; }).join('')}
         </tbody></table>
@@ -717,6 +718,11 @@ async function pageRel() {
           return `<tr><td><span class="tdcat">${c ? chip(c, 'sm') : chip(null, 'sm')}<span>${esc(c?.name || 'Sem categoria')}<br><span class="muted small">${Math.round(v / tot * 100)}% do mês</span></span></span></td><td class="money">${money(v).replace('-', '')}</td><td class="money">${diff === null ? '<span class="muted small">novo</span>' : `<span class="pill ${diff > 10 ? 'late' : diff < -10 ? 'ok' : ''}">${diff > 0 ? '+' : ''}${diff}%</span>`}</td></tr>`; }).join('') || '<tr><td colspan="3" class="empty">Sem despesas.</td></tr>'}
         </tbody></table></div>
     </div>`;
+  $$('.chart .col').forEach(c => {
+    const go = () => { const m = D(c.dataset.m); if (key(m) !== curK) { S.repMonth = m; refresh(); } };
+    c.onclick = go;
+    c.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
   $('#rPrev').onclick = () => { S.repMonth = addMonths(S.repMonth, -1); refresh(); };
   $('#rNext').onclick = () => { S.repMonth = addMonths(S.repMonth, 1); refresh(); };
 }

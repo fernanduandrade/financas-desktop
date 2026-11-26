@@ -222,7 +222,24 @@ dialog form { padding: 22px 24px; display: flex; flex-direction: column; gap: 18
 .chart .bars i.exp { background: linear-gradient(180deg, #ef8a7f, #d24b3c); }
 .chart .col.cur .lbl { color: var(--ink); font-weight: 750; }
 .chart .lbl { position: absolute; bottom: -22px; font-size: 12px; color: var(--muted); font-weight: 600; }
-.chart .col:hover { background: linear-gradient(180deg, transparent, var(--surface-2)); border-radius: 10px; }
+.chart .col:hover, .chart .col:focus-visible { background: linear-gradient(180deg, transparent, var(--surface-2)); border-radius: 10px; }
+.chart .col { cursor: pointer; outline: none; }
+.chart .col.cur { cursor: default; }
+/* cartão com os números do mês ao passar o mouse */
+.chart .tip { position: absolute; top: -4px; left: 50%; transform: translate(-50%, 6px); z-index: 5; min-width: 196px;
+  background: var(--em-950); color: #eafaf2; border-radius: 12px; padding: 11px 13px; font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 14px 30px -12px rgba(3, 46, 34, .6); opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; white-space: nowrap; }
+.chart .tip b { display: block; font-size: 13px; margin-bottom: 4px; }
+.chart .tip span { display: flex; align-items: center; gap: 6px; }
+.chart .tip em { margin-left: auto; padding-left: 14px; font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart .tip em.pos { color: #7fe3bd; } .chart .tip em.neg { color: #ffb4aa; }
+.chart .tip .res { border-top: 1px solid rgba(255,255,255,.14); margin-top: 5px; padding-top: 5px; font-weight: 600; }
+.chart .tip small { display: block; margin-top: 6px; color: rgba(234,250,242,.6); font-size: 11.5px; }
+.chart .tip .dot { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+.chart .col.tip-r .tip { left: 0; transform: translate(0, 6px); }
+.chart .col.tip-l .tip { left: auto; right: 0; transform: translate(0, 6px); }
+.chart .col:hover .tip, .chart .col:focus-visible .tip { opacity: 1; transform: translate(-50%, 0); }
+.chart .col.tip-r:hover .tip, .chart .col.tip-r:focus-visible .tip, .chart .col.tip-l:hover .tip, .chart .col.tip-l:focus-visible .tip { transform: none; }
 .legend { display: flex; gap: 16px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 
