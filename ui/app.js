@@ -236,6 +236,14 @@ document.addEventListener('keydown', e => {
 
 // ============================================================ visão geral
 async function pageInicio() {
+  if (!META.accounts.length) {
+    $('#main').innerHTML = `<div class="card" style="max-width:620px;margin:40px auto;padding:34px 36px">
+      <h1 style="margin-bottom:8px">Bem-vindo ao Finanças</h1>
+      <p class="muted" style="margin:0 0 22px">Seus dados ficam só neste computador. Para começar, importe um backup (de outro computador ou gerado a partir do Organizze) ou cadastre sua primeira conta.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn primary" href="#config" onclick="setTimeout(()=>document.getElementById('impFile')?.click(),300)">Importar backup</a>
+      <button class="btn" onclick="openAccount({kind:'conta'})">${I.plus}Cadastrar conta</button><button class="btn" onclick="openAccount({kind:'cartao'})">${I.card}Cadastrar cartão</button></div></div>`;
+    return;
+  }
   const s = await api('GET', 'summary');
   const exp = s.month.by_category;
   const totalExp = -exp.reduce((a, c) => a + c.total, 0) || 1;
@@ -768,6 +776,7 @@ async function pageConfig() {
         <p style="margin-top:0">Seus dados ficam só neste computador, em:<br><code class="small">${esc(META.data_dir)}</code></p>
         <p class="muted small">Uma cópia automática é salva todo dia na pasta <code>backups</code> (mantém as últimas 15). Para levar ao Ubuntu, exporte aqui e importe lá.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="btnExport">Exportar backup (.json)</button><label class="btn">Importar backup<input type="file" accept=".json,application/json" id="impFile" hidden></label></div>
+        <div class="opt" style="margin-top:14px;border-top:1px solid var(--line-2);padding-top:14px"><div class="txt"><b>Apagar todos os dados</b><span>Remove contas, cartões, categorias, contas fixas e lançamentos. As configurações ficam. Antes, um backup completo é salvo na pasta backups.</span></div><button class="btn danger" id="btnReset" type="button">Apagar tudo</button></div>
       </div>
     </div>`;
   $('#remForm').onsubmit = async e => {
@@ -792,6 +801,16 @@ async function pageConfig() {
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
     a.download = `financas-backup-${META.today}.json`; a.click();
   };
+  $('#btnReset').onclick = () => dialog(`<div class="dlg-head"><h3>Apagar todos os dados</h3><button type="button" class="btn ghost icon" data-close aria-label="Fechar">${I.x}</button></div>
+      <p style="margin:0">Contas, cartões, categorias, contas fixas e lançamentos serão apagados. Um backup completo é salvo antes, e você pode importá-lo de volta.</p>
+      <label class="field">Para confirmar, digite APAGAR<input name="confirm" autocomplete="off" autofocus></label>
+      <div class="dlg-foot"><span></span><span style="display:flex;gap:8px"><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="save" style="background:var(--red);border-color:var(--red)">Apagar tudo</button></span></div>`,
+    async (act, f) => {
+      if (act !== 'save') return;
+      if (f.elements.confirm.value.trim() !== 'APAGAR') throw new Error('Digite APAGAR para confirmar');
+      const r = await api('POST', 'reset', { confirm: 'APAGAR' });
+      toast('Dados apagados. Backup salvo em ' + r.backup); refresh();
+    });
   $('#impFile').onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
     const data = JSON.parse(await file.text());
@@ -813,20 +832,29 @@ function openAccount(a) {
       : `<label class="field full">Saldo atual<input name="saldo" inputmode="decimal" value="${editing ? (a.balance_cents < 0 ? '-' : '') + moneyInput(a.balance_cents) : '0,00'}"><span class="small">Alterar aqui ajusta o saldo inicial para a conta mostrar esse valor hoje.</span></label>`}
       <label class="field">Cor<input type="color" name="color" value="${esc(a.color || '#0f6e56')}"></label>
     </div>
-    <div class="dlg-foot">${editing ? `<button type="button" class="btn danger" id="btnArch">${I.trash}Excluir</button>` : '<span></span>'}
+    ${editing && a.archived ? `<p class="muted small" style="margin:0">${isCard ? 'Este cartão' : 'Esta conta'} está arquivad${isCard ? 'o' : 'a'}: fica fora do saldo e das listas, mas os lançamentos continuam em Lançamentos e Relatórios.</p>` : ''}
+    <div class="dlg-foot">${editing ? `<span style="display:flex;gap:8px">${a.archived
+        ? `<button type="button" class="btn" id="btnUnarch">Reativar</button>`
+        : `<button type="button" class="btn" id="btnArch">Arquivar</button>`}<button type="button" class="btn ghost danger" id="btnDelAcc">${I.trash}Excluir</button></span>` : '<span></span>'}
       <span style="display:flex;gap:8px"><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="save">Salvar</button></span></div>`,
     async (act, f) => {
       if (act !== 'save') return;
       const fd = Object.fromEntries(new FormData(f));
-      const body = { name: fd.name, kind: a.kind, color: fd.color, archived: 0 };
+      const body = { name: fd.name, kind: a.kind, color: fd.color, archived: a.archived ? 1 : 0 };
       if (isCard) Object.assign(body, { limit_cents: parseMoney(fd.limite) || 0, closing_day: +fd.closing_day, due_day: +fd.due_day, payment_account_id: +fd.payment_account_id || null });
       else { const v = parseMoney(fd.saldo); if (!isNaN(v)) body.balance_cents = v; }
       await api(editing ? 'PUT' : 'POST', editing ? `accounts/${a.id}` : 'accounts', body);
       toast('Salvo'); refresh();
     });
-  if (editing) $('#btnArch').onclick = async () => {
-    if (!confirm(`Excluir "${a.name}"? Se houver lançamentos, ela será apenas arquivada.`)) return;
-    const r = await api('DELETE', `accounts/${a.id}`); $('#dlg').close(); toast(r.resultado === 'arquivada' ? 'Arquivada (tem lançamentos)' : 'Excluída'); refresh();
+  const setArchived = async v => {
+    await api('PUT', `accounts/${a.id}`, { archived: v });
+    $('#dlg').close(); toast(v ? 'Arquivado. O histórico continua nos relatórios' : 'Reativado'); refresh();
+  };
+  if (editing && $('#btnArch')) $('#btnArch').onclick = () => setArchived(1);
+  if (editing && $('#btnUnarch')) $('#btnUnarch').onclick = () => setArchived(0);
+  if (editing) $('#btnDelAcc').onclick = async () => {
+    if (!confirm(`Excluir "${a.name}"? Se houver lançamentos, ela será arquivada em vez de excluída, para não perder o histórico.`)) return;
+    const r = await api('DELETE', `accounts/${a.id}`); $('#dlg').close(); toast(r.resultado === 'arquivada' ? 'Tem lançamentos: foi arquivada' : 'Excluída'); refresh();
   };
 }
 

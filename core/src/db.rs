@@ -1436,7 +1436,26 @@ impl Db {
         Ok(folder)
     }
 
-    /// Importa os dados do Organizze na primeira execução. Se vier uma versão mais nova dos dados
+    /// Apaga todos os dados (contas, cartões, categorias, contas fixas, lançamentos e faturas),
+    /// mantendo as configurações. Antes, salva um backup completo em `backups/`.
+    pub fn reset_all(&self) -> R<PathBuf> {
+        let folder = self.data_dir.join("backups");
+        std::fs::create_dir_all(&folder).map_err(|x| x.to_string())?;
+        let name = folder.join(format!("antes-de-apagar-{}.json", Local::now().format("%Y-%m-%d-%H%M%S")));
+        let txt = serde_json::to_string(&Value::Object(self.export_all()?)).map_err(|x| x.to_string())?;
+        std::fs::write(&name, txt).map_err(|x| x.to_string())?;
+        self.atomic(|db| {
+            for t in TABLES.iter().filter(|t| **t != "settings") {
+                db.exec(&format!("DELETE FROM {t}"), p![])?;
+            }
+            db.exec("DELETE FROM settings WHERE key='seed_version'", p![])?;
+            Ok(())
+        })?;
+        Ok(name)
+    }
+
+    /// Importa um conjunto de dados inicial se o banco estiver vazio (usado nos testes e na
+    /// comparação com a versão Python). Se vier uma versão mais nova dos dados
     /// e ainda não houver lançamentos feitos à mão, atualiza sozinho (com backup antes).
     pub fn first_run_import(&self, seed: &Obj) -> R<bool> {
         let version = match seed.get("seed_version") {
