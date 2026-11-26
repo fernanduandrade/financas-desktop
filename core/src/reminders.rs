@@ -1,6 +1,6 @@
 //! Lembretes: mesma lógica do `check_reminders` do financas.pyw.
 //! Devolve os avisos a mostrar; quem chama decide como mostrar (janela própria, sistema, ntfy).
-use crate::dates::{brl, parse};
+use crate::dates::{brl, closing_date_for, grace_text, parse, weekday_pt};
 use crate::db::{Db, R};
 use chrono::{Datelike, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -158,7 +158,19 @@ pub fn check_reminders(db: &Db, now: NaiveDateTime, force: Option<&str>) -> R<Ve
         mark(&sp, "contas", &today);
     }
 
-    // 2) lembrete diário de lançar os gastos
+    let on = |k: &str| s(k).unwrap_or_else(|| "1".into()) == "1";
+
+    // 2) fechamento das faturas: avisa antes de fechar e quando fechou (uma vez por fatura)
+    if on("aviso_fechamento_ativo")
+        && (force == Some("fechamento") || now.time() >= hm(s("aviso_contas_hora"), "09:00"))
+    {
+        let days = s("aviso_fechamento_dias").and_then(|x| x.trim().parse::<i64>().ok()).unwrap_or(1);
+        if let Some(n) = closing_notice(db, &sp, days, force == Some("fechamento"))? {
+            out.push(n);
+        }
+    }
+
+    // 3) lembrete diário de lançar os gastos
     let on = |k: &str| s(k).unwrap_or_else(|| "1".into()) == "1";
     if on("lembrete_diario_ativo")
         && (force == Some("diario")
@@ -188,7 +200,7 @@ pub fn check_reminders(db: &Db, now: NaiveDateTime, force: Option<&str>) -> R<Ve
         mark(&sp, "diario", &today);
     }
 
-    // 3) revisão semanal (domingo)
+    // 4) revisão semanal (domingo)
     let iw = now.date().iso_week();
     let week = format!("{}-{}", iw.year(), iw.week());
     if on("revisao_semanal_ativo")
@@ -212,4 +224,75 @@ pub fn check_reminders(db: &Db, now: NaiveDateTime, force: Option<&str>) -> R<Ve
         mark(&sp, "semanal", &week);
     }
     Ok(out)
+}
+
+fn dm(d: chrono::NaiveDate) -> String {
+    format!("{}, {}", weekday_pt(d), d.format("%d/%m"))
+}
+
+/// Aviso de fechamento das faturas dos cartões ativos:
+/// - "fecha amanhã": até `days` dias antes do fechamento, com o total até agora e para quando
+///   vão as compras feitas depois;
+/// - "fechou": no dia seguinte ao fechamento, com o total, o vencimento e a folga se o
+///   vencimento cair em fim de semana ou feriado.
+/// Cada evento é avisado uma vez por fatura (fica marcado em lembretes.json).
+pub fn closing_notice(db: &Db, state: &Path, days: i64, force: bool) -> R<Option<Notice>> {
+    let today = db.today();
+    let st = load_state(state);
+    let done = |k: &str| !force && st.contains_key(k);
+    let mut lines = Vec::new();
+    let mut keys = Vec::new();
+    for card in db.rows("SELECT * FROM accounts WHERE kind='cartao' AND archived=0 ORDER BY sort, name", vec![])? {
+        let id = card["id"].as_i64().unwrap_or(0);
+        let name = card["name"].as_str().unwrap_or("").to_string();
+        let (cl, du) = (card["closing_day"].as_i64().unwrap_or(1), card["due_day"].as_i64().unwrap_or(1));
+        let invs = db.list_invoices(id)?;
+        let total_of = |due: &str| invs.iter().find(|i| i["due"] == due).and_then(|i| i["total_cents"].as_i64()).unwrap_or(0);
+
+        // fatura aberta que está para fechar
+        let cur = db.current_invoice(&card, None);
+        let close = closing_date_for(cur, cl, du);
+        let left = (close - today).num_days();
+        let key = format!("fecha:{id}:{}", crate::dates::iso(cur));
+        if (0..=days).contains(&left) && !done(&key) {
+            let quando = match left { 0 => "hoje".to_string(), 1 => "amanhã".to_string(), n => format!("em {n} dias") };
+            let next_due = crate::dates::invoice_due_for(close + chrono::Duration::days(1), cl, du);
+            lines.push(format!(
+                "{name} fecha {quando} ({}), com {} até agora. Compras a partir de {} vão para a fatura que vence em {}.",
+                close.format("%d/%m"),
+                brl(total_of(&crate::dates::iso(cur)).abs()),
+                (close + chrono::Duration::days(1)).format("%d/%m"),
+                next_due.format("%d/%m")
+            ));
+            keys.push(key);
+        }
+
+        // fatura que acabou de fechar (fechou ontem ou antes, ainda não paga)
+        for inv in invs.iter().filter(|i| i["state"] == "fechada") {
+            let due = parse(inv["due"].as_str().unwrap_or(""))?;
+            let key = format!("fechou:{id}:{}", crate::dates::iso(due));
+            if done(&key) {
+                continue;
+            }
+            let mut line = format!(
+                "{name} fechou em {}. Vence {}",
+                brl(inv["total_cents"].as_i64().unwrap_or(0).abs()),
+                dm(due)
+            );
+            match grace_text(due) {
+                Some(g) => line.push_str(&format!("; {g}.")),
+                None => line.push('.'),
+            }
+            lines.push(line);
+            keys.push(key);
+        }
+    }
+    if lines.is_empty() {
+        return Ok(None);
+    }
+    for k in &keys {
+        mark(state, k, &crate::dates::iso(today));
+    }
+    let title = if lines.len() == 1 { "Fatura do cartão".to_string() } else { format!("{} avisos de fatura", lines.len()) };
+    Ok(Some(Notice::new(title, lines.join("\n"), "contas", vec![act("Ver cartões", Some("cartoes")), act("Ok", None)])))
 }

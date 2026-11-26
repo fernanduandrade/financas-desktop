@@ -240,6 +240,14 @@ pub fn route(db: &Db, method: &str, path: &str, body: Option<Value>) -> R<Value>
             db.save_settings(&body_obj(&body))?;
             return ok();
         }
+        "reset" if m == "POST" => {
+            let b = body_obj(&body);
+            if b.get("confirm").and_then(|v| v.as_str()) != Some("APAGAR") {
+                return Err("Para apagar tudo, confirme digitando APAGAR".into());
+            }
+            let path = db.reset_all()?;
+            return Ok(json!({"ok": true, "backup": path.to_string_lossy()}));
+        }
         "backup" => {
             if m == "GET" {
                 return Ok(Value::Object(db.export_all()?));

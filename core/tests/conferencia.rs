@@ -1,18 +1,31 @@
-//! Confere os valores de 25/11/2026 (seção 2 do briefing) a partir de dados_iniciais.json.
+//! Confere os valores de 25/11/2026 (seção 2 do briefing) a partir de tests/dados/dados_iniciais.json.
+//! Esse arquivo tem dados pessoais e não vai no instalador; sem ele, os testes de conferência são pulados.
 use financas_core::{api, dates::parse, Db};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
-fn db_hoje() -> (Db, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!(
-        "financas-teste-{}-{}",
-        std::process::id(),
-        rand_suffix()
-    ));
+const SEED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/dados/dados_iniciais.json");
+
+fn seed() -> Option<Map<String, Value>> {
+    std::fs::read_to_string(SEED).ok().map(|s| serde_json::from_str(&s).unwrap())
+}
+
+fn db_vazio() -> Db {
+    let dir = std::env::temp_dir().join(format!("financas-teste-{}-{}", std::process::id(), rand_suffix()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut db = Db::open(&dir.join("financas.db"), &dir).unwrap();
     db.set_today(Some(parse("2026-11-25").unwrap()));
-    assert!(db.first_run_import(&financas_core::seed()).unwrap());
-    (db, dir)
+    db
+}
+
+/// Banco com o histórico do Organizze, ou None (teste pulado) se o arquivo não estiver no repositório.
+fn db_hoje() -> Option<(Db, ())> {
+    let Some(seed) = seed() else {
+        eprintln!("pulado: {SEED} não encontrado");
+        return None;
+    };
+    let db = db_vazio();
+    assert!(db.first_run_import(&seed).unwrap());
+    Some((db, ()))
 }
 
 fn rand_suffix() -> u128 {
@@ -32,7 +45,7 @@ fn by_name<'a>(list: &'a Value, name: &str) -> &'a Value {
 
 #[test]
 fn saldos_das_contas() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     let meta = api::route(&db, "GET", "meta", None).unwrap();
     let accs = &meta["accounts"];
     assert_eq!(by_name(accs, "Itaú - Principal")["balance_cents"], 3460);
@@ -45,7 +58,7 @@ fn saldos_das_contas() {
 
 #[test]
 fn disponivel_nos_cartoes() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     let s = api::route(&db, "GET", "summary", None).unwrap();
     assert_eq!(by_name(&s["cards"], "Nubank")["available_cents"], 1422862);
     assert_eq!(
@@ -60,7 +73,7 @@ fn disponivel_nos_cartoes() {
 
 #[test]
 fn faturas_a_pagar() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     let s = api::route(&db, "GET", "summary", None).unwrap();
     assert_eq!(s["invoices_cents"], -943772);
     let platinum_fechada = s["invoices"]
@@ -75,7 +88,7 @@ fn faturas_a_pagar() {
 
 #[test]
 fn historico_completo() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     let n: i64 = db
         .conn
         .query_row(
@@ -86,12 +99,12 @@ fn historico_completo() {
         .unwrap();
     assert_eq!(n, 1448);
     // a importação não pode ser repetida por cima dos dados
-    assert!(!db.first_run_import(&financas_core::seed()).unwrap());
+    assert!(!db.first_run_import(&seed().unwrap()).unwrap());
 }
 
 #[test]
 fn compra_depois_do_fechamento_vai_para_a_proxima_fatura() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     // Nubank fecha dia 25 e vence dia 2
     let r = api::route(&db, "POST", "transactions", Some(json!({"description": "x", "amount_cents": -100, "date": "2026-11-26", "account_id": 4}))).unwrap();
     let t = db
@@ -107,10 +120,90 @@ fn compra_depois_do_fechamento_vai_para_a_proxima_fatura() {
 
 #[test]
 fn backup_ida_e_volta() {
-    let (db, _) = db_hoje();
+    let Some((db, _)) = db_hoje() else { return };
     let antes = api::route(&db, "GET", "summary", None).unwrap();
     let exp = api::route(&db, "GET", "backup", None).unwrap();
     api::route(&db, "POST", "backup", Some(exp)).unwrap();
     let depois = api::route(&db, "GET", "summary", None).unwrap();
     assert_eq!(antes, depois);
+}
+
+#[test]
+fn instalacao_nova_comeca_vazia() {
+    let db = db_vazio();
+    let s = api::route(&db, "GET", "summary", None).unwrap();
+    assert_eq!(s["balance_cents"], 0);
+    assert_eq!(s["accounts"].as_array().unwrap().len(), 0);
+    let meta = api::route(&db, "GET", "meta", None).unwrap();
+    assert_eq!(meta["settings"]["lembrete_diario"], "21:00");
+}
+
+#[test]
+fn arquivar_preserva_o_historico() {
+    let db = db_vazio();
+    let a = api::route(&db, "POST", "accounts", Some(json!({"name": "Banco X", "kind": "conta", "balance_cents": 10000}))).unwrap()["id"].clone();
+    let b = api::route(&db, "POST", "accounts", Some(json!({"name": "Banco Y", "kind": "conta", "balance_cents": 500}))).unwrap()["id"].clone();
+    api::route(&db, "POST", "transactions", Some(json!({"description": "Mercado", "amount_cents": -2500, "date": "2026-11-20", "account_id": a}))).unwrap();
+    assert_eq!(api::route(&db, "GET", "summary", None).unwrap()["balance_cents"], 8000);
+
+    // arquivar: some do saldo, o lançamento continua nos relatórios
+    api::route(&db, "PUT", &format!("accounts/{a}"), Some(json!({"archived": 1}))).unwrap();
+    let s = api::route(&db, "GET", "summary", None).unwrap();
+    assert_eq!(s["balance_cents"], 500);
+    let tx = api::route(&db, "GET", "transactions?start=2026-11-01&end=2026-11-30", None).unwrap();
+    assert_eq!(tx["items"].as_array().unwrap().len(), 1);
+    assert_eq!(tx["expense_cents"], -2500);
+
+    // reativar: volta com o mesmo saldo
+    api::route(&db, "PUT", &format!("accounts/{a}"), Some(json!({"archived": 0}))).unwrap();
+    assert_eq!(api::route(&db, "GET", "summary", None).unwrap()["balance_cents"], 8000);
+
+    // excluir conta com histórico só arquiva; sem histórico, exclui
+    assert_eq!(api::route(&db, "DELETE", &format!("accounts/{a}"), None).unwrap()["resultado"], "arquivada");
+    assert_eq!(api::route(&db, "DELETE", &format!("accounts/{b}"), None).unwrap()["resultado"], "excluida");
+}
+
+#[test]
+fn apagar_tudo_faz_backup_e_mantem_configuracoes() {
+    let db = db_vazio();
+    api::route(&db, "POST", "accounts", Some(json!({"name": "Banco X", "kind": "conta", "balance_cents": 10000}))).unwrap();
+    api::route(&db, "POST", "settings", Some(json!({"ntfy_topico": "meu-topico"}))).unwrap();
+    assert!(api::route(&db, "POST", "reset", Some(json!({}))).is_err(), "sem confirmação não apaga");
+    let r = api::route(&db, "POST", "reset", Some(json!({"confirm": "APAGAR"}))).unwrap();
+    let backup = std::path::PathBuf::from(r["backup"].as_str().unwrap());
+    assert!(backup.exists());
+    let exp: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
+    assert_eq!(exp["accounts"].as_array().unwrap().len(), 1);
+    let meta = api::route(&db, "GET", "meta", None).unwrap();
+    assert_eq!(meta["accounts"].as_array().unwrap().len(), 0);
+    assert_eq!(meta["settings"]["ntfy_topico"], "meu-topico");
+    // o backup volta tudo
+    api::route(&db, "POST", "backup", Some(exp)).unwrap();
+    assert_eq!(api::route(&db, "GET", "summary", None).unwrap()["balance_cents"], 10000);
+}
+
+#[test]
+fn aviso_de_fechamento_das_faturas() {
+    let Some((db, _)) = db_hoje() else { return };
+    let state = db.data_dir.join("lembretes.json");
+    let n = financas_core::reminders::closing_notice(&db, &state, 1, false).unwrap().expect("aviso");
+    println!("{}\n{}", n.title, n.message);
+    assert!(n.message.contains("Nubank fecha hoje (25/11)"));
+    assert!(n.message.contains("Magazine - Itáu fecha amanhã (26/11)"));
+    assert!(n.message.contains("Itaú Platium - Visa fechou em R$ 3.384,92. Vence terça, 01/12."));
+    // não repete
+    assert!(financas_core::reminders::closing_notice(&db, &state, 1, false).unwrap().is_none());
+}
+
+#[test]
+fn folga_no_vencimento() {
+    let db = db_vazio();
+    // cartão que vence dia 5: em dezembro/2026 cai num sábado
+    api::route(&db, "POST", "accounts", Some(json!({"name": "Conta", "kind": "conta", "balance_cents": 0}))).unwrap();
+    let c = api::route(&db, "POST", "accounts", Some(json!({"name": "Cartão", "kind": "cartao", "closing_day": 27, "due_day": 5, "limit_cents": 100000}))).unwrap()["id"].clone();
+    api::route(&db, "POST", "transactions", Some(json!({"description": "x", "amount_cents": -1000, "date": "2026-11-20", "account_id": c}))).unwrap();
+    let inv = api::route(&db, "GET", &format!("invoices?card={c}"), None).unwrap();
+    let i = inv["invoices"].as_array().unwrap().iter().find(|i| i["due"] == "2026-12-05").unwrap();
+    assert_eq!(i["pay_until"], "2026-12-07");
+    assert_eq!(i["grace_days"], 2);
 }

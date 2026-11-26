@@ -1,5 +1,5 @@
 //! Repete um roteiro de chamadas (scenario.json) e grava as respostas, para comparar com a versão Python.
-//! Uso: cargo run -p financas-core --example replay -- scenario.json saida.json
+//! Uso: cargo run -p financas-core --example replay -- scenario.json saida.json [dados_iniciais.json]
 use chrono::NaiveDateTime;
 use financas_core::{api, dates, reminders, Db};
 use serde_json::{json, Map, Value};
@@ -21,8 +21,13 @@ fn main() {
     std::fs::create_dir_all(&work).unwrap();
     let mut db = Db::open(&work.join("financas.db"), &work).unwrap();
     db.set_today(Some(dates::parse("2026-11-25").unwrap()));
-    let seed = financas_core::seed();
+    let seed_path = args.get(3).cloned().unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/dados/dados_iniciais.json").into());
+    let seed: Map<String, Value> = serde_json::from_str(&std::fs::read_to_string(&seed_path).expect("dados iniciais")).unwrap();
     db.first_run_import(&seed).unwrap();
+    // a versão Python não tinha o aviso de fechamento das faturas
+    let mut off = Map::new();
+    off.insert("aviso_fechamento_ativo".into(), json!("0"));
+    db.save_settings(&off).unwrap();
 
     let steps: Vec<Value> =
         serde_json::from_str(&std::fs::read_to_string(&args[1]).unwrap()).unwrap();

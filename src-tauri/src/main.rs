@@ -285,11 +285,6 @@ fn main() {
     let hidden = std::env::args().any(|a| a == "--oculto");
 
     let db = Db::open_default().expect("não consegui abrir o banco de dados");
-    match db.first_run_import(&financas_core::seed()) {
-        Ok(true) => log("dados do Organizze importados"),
-        Ok(false) => {}
-        Err(e) => log(format!("importação inicial: {e}")),
-    }
     if let Err(e) = db
         .ensure_recurrences(62)
         .and_then(|_| db.auto_backup(15).map(|_| ()))
