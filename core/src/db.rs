@@ -283,6 +283,14 @@ impl Db {
                 conn.execute_batch(&format!("ALTER TABLE accounts ADD COLUMN {c} TEXT")).map_err(e)?;
             }
         }
+        // migração v2: ícone escolhido para a categoria (vazio = ícone automático pelo nome)
+        let ccols: Vec<String> = conn
+            .prepare("PRAGMA table_info(categories)")
+            .and_then(|mut st| st.query_map([], |r| r.get::<_, String>(1))?.collect())
+            .map_err(e)?;
+        if !ccols.iter().any(|x| x == "icon") {
+            conn.execute_batch("ALTER TABLE categories ADD COLUMN icon TEXT").map_err(e)?;
+        }
         for (k, v) in DEFAULT_SETTINGS {
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",
@@ -578,19 +586,16 @@ impl Db {
         if truthy(d.get("id")) {
             self.exec(
                 "UPDATE categories SET name=?, kind=?, parent_id=?, color=? WHERE id=?",
-                vec![
-                    sql(&name),
-                    sql(&kind),
-                    sql(&parent),
-                    sql(&color),
-                    sql(&d["id"]),
-                ],
+                vec![sql(&name), sql(&kind), sql(&parent), sql(&color), sql(&d["id"])],
             )?;
+            if let Some(icon) = d.get("icon") {
+                self.exec("UPDATE categories SET icon=? WHERE id=?", vec![sql(icon), sql(&d["id"])])?;
+            }
             return Ok(d["id"].clone());
         }
         let id = self.exec(
-            "INSERT INTO categories(name,kind,parent_id,color) VALUES(?,?,?,?)",
-            vec![sql(&name), sql(&kind), sql(&parent), sql(&color)],
+            "INSERT INTO categories(name,kind,parent_id,color,icon) VALUES(?,?,?,?,?)",
+            vec![sql(&name), sql(&kind), sql(&parent), sql(&color), sql(d.get("icon").unwrap_or(&Value::Null))],
         )?;
         Ok(json!(id))
     }
@@ -1371,7 +1376,76 @@ impl Db {
                 "after_invoices_cents": forecast + inv_total,
             }),
         );
+        self.add_snowball(&mut o, t, fixed_inc)?;
         Ok(o)
+    }
+
+    /// Indicadores de "bola de neve" do cartão: faturas do próximo mês contra a renda fixa,
+    /// evolução das faturas nos últimos meses e quanto dos gastos foi no cartão.
+    fn add_snowball(&self, o: &mut Obj, t: NaiveDate, fixed_inc: i64) -> R<()> {
+        // mês das próximas faturas: o do vencimento mais próximo ainda não pago (a partir de hoje)
+        let ts = iso(t);
+        let mut next_due: Option<String> = None;
+        for card in self.rows("SELECT * FROM accounts WHERE kind='cartao' AND archived=0", p![])? {
+            for inv in self.list_invoices_for(&card)? {
+                let due = str_of(&inv, "due");
+                if !truthy(inv.get("paid")) && int_of(&inv, "total_cents") < 0 && due >= ts && next_due.as_ref().map_or(true, |n| due < *n) {
+                    next_due = Some(due);
+                }
+            }
+        }
+        let month = match next_due {
+            Some(d) => d[..7].to_string(),
+            None => iso(add_months(first_of_month(t), 1, None))[..7].to_string(),
+        };
+        let m0 = parse(&format!("{month}-01"))?;
+        let mut series = Vec::new();
+        for k in (0..6).rev() {
+            let m = add_months(m0, -k, None);
+            let key = iso(m)[..7].to_string();
+            let total = -self.scalar(
+                "SELECT COALESCE(SUM(t.amount_cents),0) FROM transactions t JOIN accounts a ON a.id=t.account_id
+                 WHERE a.kind='cartao' AND substr(t.invoice_due,1,7)=?",
+                p![key.clone()],
+            )?;
+            series.push((key, total));
+        }
+        let next = series.last().map(|x| x.1).unwrap_or(0);
+        let mut streak = 0;
+        for w in series.windows(2).rev() {
+            if w[1].1 > w[0].1 && w[0].1 > 0 {
+                streak += 1;
+            } else {
+                break;
+            }
+        }
+        // cartão x débito nos gastos do mês (lançamentos normais), mês atual e os dois anteriores
+        let mut share = Vec::new();
+        for k in (0..3).rev() {
+            let m = add_months(first_of_month(t), -k, None);
+            let (a, b) = (iso(m), iso(last_of_month(m)));
+            let card = -self.scalar(
+                "SELECT COALESCE(SUM(t.amount_cents),0) FROM transactions t JOIN accounts a ON a.id=t.account_id
+                 WHERE t.kind='normal' AND t.amount_cents<0 AND a.kind='cartao' AND t.date BETWEEN ? AND ?",
+                p![a.clone(), b.clone()],
+            )?;
+            let debit = -self.scalar(
+                "SELECT COALESCE(SUM(t.amount_cents),0) FROM transactions t JOIN accounts a ON a.id=t.account_id
+                 WHERE t.kind='normal' AND t.amount_cents<0 AND a.kind='conta' AND t.date BETWEEN ? AND ?",
+                p![a, b],
+            )?;
+            share.push(json!({"month": iso(m)[..7], "card_cents": card, "debit_cents": debit,
+                "card_ratio": if card + debit > 0 { json!(card as f64 / (card + debit) as f64) } else { Value::Null }}));
+        }
+        if let Some(Value::Object(h)) = o.get_mut("health") {
+            h.insert("next_invoices_month".into(), json!(month));
+            h.insert("next_invoices_cents".into(), json!(next));
+            h.insert("next_invoices_ratio".into(), if fixed_inc > 0 { json!(next as f64 / fixed_inc as f64) } else { Value::Null });
+            h.insert("invoice_months".into(), Value::Array(series.into_iter().map(|(m, v)| json!({"month": m, "total_cents": v})).collect()));
+            h.insert("invoice_growth_streak".into(), json!(streak));
+            h.insert("card_share".into(), Value::Array(share));
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------- backup

@@ -222,3 +222,30 @@ fn saude_financeira() {
     assert_eq!(h["after_invoices_cents"], 1864310 - 943772);
     assert!((h["savings_ratio"].as_f64().unwrap() - 0.5457).abs() < 0.001);
 }
+
+#[test]
+fn bola_de_neve_do_cartao() {
+    let Some((db, _)) = db_hoje() else { return };
+    let h = api::route(&db, "GET", "summary", None).unwrap()["health"].clone();
+    assert_eq!(h["next_invoices_month"], "2026-12");
+    assert_eq!(h["next_invoices_cents"], 941193);
+    assert_eq!(h["invoice_growth_streak"], 4);
+    let months: Vec<i64> = h["invoice_months"].as_array().unwrap().iter().map(|m| m["total_cents"].as_i64().unwrap()).collect();
+    assert_eq!(&months[2..], &[212367, 244777, 303900, 941193]);
+    let nov = &h["card_share"][2];
+    assert_eq!(nov["month"], "2026-11");
+    assert_eq!(nov["card_cents"], 453553);
+    assert_eq!(nov["debit_cents"], 398218);
+    assert!((h["next_invoices_ratio"].as_f64().unwrap() - 1.4035).abs() < 0.001);
+}
+
+#[test]
+fn categoria_com_icone() {
+    let db = db_vazio();
+    let id = api::route(&db, "POST", "categories", Some(json!({"name": "Mercado", "kind": "despesa", "color": "#F9845D", "icon": "cart"}))).unwrap()["id"].clone();
+    api::route(&db, "PUT", &format!("categories/{id}"), Some(json!({"name": "Mercado", "kind": "despesa", "color": "#167A56", "icon": "food"}))).unwrap();
+    let meta = api::route(&db, "GET", "meta", None).unwrap();
+    let c = &meta["categories"][0];
+    assert_eq!(c["icon"], "food");
+    assert_eq!(c["color"], "#167A56");
+}
