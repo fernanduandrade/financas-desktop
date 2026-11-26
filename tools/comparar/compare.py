@@ -10,7 +10,7 @@ def norm(v, ids):
         for k, x in v.items():
             if k in NOVAS: continue
             if isinstance(x, dict) and x.get("key") in NOVAS: continue
-            if k in ("exported_at", "data_dir", "pay_until", "grace_days", "network", "tier"): continue  # campos novos da v2
+            if k in ("exported_at", "data_dir", "pay_until", "grace_days", "network", "tier", "health"): continue  # campos novos da v2
             if k == "created_at" and x != "2026-11-01 00:00:00": x = "<agora>"
             out[k] = norm(x, ids)
         return out

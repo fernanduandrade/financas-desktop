@@ -1350,10 +1350,27 @@ impl Db {
         o.insert("invoices_cents".into(), json!(inv_total));
         o.insert("invoices".into(), objs(to_pay));
         o.insert("accounts".into(), objs(contas));
-        o.insert("cards".into(), objs(cards));
+        o.insert("cards".into(), objs(cards.clone()));
         o.insert("upcoming".into(), objs(up));
         o.insert("month".into(), Value::Object(m));
         o.insert("launched_today".into(), json!(self.launched_today()?));
+        // saúde financeira (v2): números para os indicadores da visão geral
+        let income = month["income_cents"].as_i64().unwrap_or(0);
+        let result = month["result_cents"].as_i64().unwrap_or(0);
+        let fixed_exp = -self.scalar("SELECT COALESCE(SUM(amount_cents),0) FROM recurrences WHERE active=1 AND amount_cents<0", p![])?;
+        let fixed_inc = self.scalar("SELECT COALESCE(SUM(amount_cents),0) FROM recurrences WHERE active=1 AND amount_cents>0", p![])?;
+        let limit: i64 = cards.iter().map(|c| int_of(c, "limit_cents")).sum();
+        let used: i64 = -cards.iter().map(|c| int_of(c, "open_cents")).sum::<i64>();
+        let ratio = |a: i64, b: i64| if b > 0 { json!(a as f64 / b as f64) } else { Value::Null };
+        o.insert(
+            "health".into(),
+            json!({
+                "savings_cents": result, "income_cents": income, "savings_ratio": ratio(result, income),
+                "fixed_expense_cents": fixed_exp, "fixed_income_cents": fixed_inc, "fixed_ratio": ratio(fixed_exp, fixed_inc),
+                "cards_used_cents": used, "cards_limit_cents": limit, "cards_ratio": ratio(used, limit),
+                "after_invoices_cents": forecast + inv_total,
+            }),
+        );
         Ok(o)
     }
 

@@ -195,14 +195,36 @@ function plastic(c, closedInv) {
 function donut(items, total, label) {
   const R = 70, C = 2 * Math.PI * R;
   let off = 0;
-  const segs = items.map(it => {
+  const segs = items.map((it, i) => {
     const len = Math.max(0, it.value / total * C);
-    const s = `<circle r="${R}" cx="90" cy="90" stroke="${esc(it.color)}" stroke-dasharray="${Math.max(0, len - 2)} ${C}" stroke-dashoffset="${-off}"><title>${esc(it.name)}: ${money(-it.value)}</title></circle>`;
+    const p = total ? Math.round(it.value / total * 1000) / 10 : 0;
+    const s = `<circle class="seg" data-i="${i}" data-name="${esc(it.name)}" data-v="${esc(money(it.value))}" data-p="${p.toLocaleString('pt-BR')}%" tabindex="0" aria-label="${esc(it.name)}: ${esc(money(it.value))}, ${p.toLocaleString('pt-BR')}%" r="${R}" cx="90" cy="90" stroke="${esc(it.color)}" stroke-dasharray="${Math.max(0, len - 2)} ${C}" stroke-dashoffset="${-off}"></circle>`;
     off += len; return s;
   }).join('');
   return `<div class="donut"><svg viewBox="0 0 180 180"><circle r="${R}" cx="90" cy="90" stroke="var(--line-2)"/>${segs}</svg>
-    <div class="center"><span>${esc(label)}</span><b>${money(total)}</b></div></div>`;
+    <div class="center" data-l="${esc(label)}" data-v="${esc(money(total))}"><span>${esc(label)}</span><b>${money(total)}</b><small></small></div></div>`;
 }
+// rosca: ao passar o mouse (ou focar) numa fatia ou na linha da tabela, o centro mostra categoria, valor e %
+function donutShow(d, i) {
+  const c = d.querySelector('.center'), seg = i == null ? null : d.querySelector(`circle.seg[data-i="${i}"]`);
+  d.classList.toggle('hl', !!seg);
+  d.querySelectorAll('circle.seg').forEach(x => x.classList.toggle('on', x === seg));
+  c.querySelector('span').textContent = seg ? seg.dataset.name : c.dataset.l;
+  c.querySelector('b').textContent = seg ? seg.dataset.v : c.dataset.v;
+  c.querySelector('small').textContent = seg ? seg.dataset.p + ' das despesas' : '';
+}
+const donutOf = el => el.closest('.card')?.querySelector('.donut');
+['mouseover', 'focusin'].forEach(ev => document.addEventListener(ev, e => {
+  const seg = e.target.closest?.('.donut circle.seg'), row = e.target.closest?.('[data-seg]');
+  if (seg) donutShow(seg.closest('.donut'), seg.dataset.i);
+  else if (row && donutOf(row)) donutShow(donutOf(row), row.dataset.seg);
+}));
+['mouseout', 'focusout'].forEach(ev => document.addEventListener(ev, e => {
+  const el = e.target.closest?.('.donut circle.seg, [data-seg]');
+  if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+  const d = el.matches('circle') ? el.closest('.donut') : donutOf(el);
+  if (d) donutShow(d, null);
+}));
 
 // ============================================================ roteamento
 const PAGES = { inicio: pageInicio, lancamentos: pageLanc, cartoes: pageCartoes, fixas: pageFixas, relatorios: pageRel, config: pageConfig };
@@ -251,60 +273,112 @@ async function pageInicio() {
     return;
   }
   const s = await api('GET', 'summary');
-  const exp = s.month.by_category;
-  const totalExp = -exp.reduce((a, c) => a + c.total, 0) || 1;
-  const top = exp.slice(0, 6), rest = exp.slice(6).reduce((a, c) => a + c.total, 0);
-  const pieItems = [...top.map(c => ({ name: c.name, color: c.color || '#8a958f', value: -c.total })), ...(rest ? [{ name: 'Outras', color: '#c7d0cb', value: -rest }] : [])];
-  const cards = s.cards.filter(c => !c.archived);
-  const closed = s.invoices.filter(i => i.state === 'fechada' || i.state === 'atrasada');
-  const today = D(s.today);
+  const today = D(s.today), h = s.health || {};
   const hour = new Date().getHours();
   const hello = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
+  const mes = today.toLocaleDateString('pt-BR', { month: 'long' });
+  const wdDate = iso => { const d = D(iso); return `${d.toLocaleDateString('pt-BR', { weekday: 'long' }).replace('-feira', '')}, ${brShort(iso)}`; };
+  const pct = (r, digits = 0) => r == null ? '—' : (r * 100).toLocaleString('pt-BR', { maximumFractionDigits: digits, minimumFractionDigits: digits }) + '%';
+  const w = r => `${Math.max(0, Math.min(100, (r || 0) * 100))}%`;
+  const spent = s.month.income_cents ? -s.month.expense_cents / s.month.income_cents : null;
+
+  // saúde financeira: status com palavra + cor (nunca só cor)
+  const st = (label, tone) => ({ label, tone });
+  const kSav = h.savings_ratio == null ? st('Sem entradas', 'muted') : h.savings_ratio >= .2 ? st('Ótima', 'ok') : h.savings_ratio >= .1 ? st('Razoável', 'warn') : h.savings_ratio >= 0 ? st('Baixa', 'warn') : st('No vermelho', 'bad');
+  const kFix = h.fixed_ratio == null ? st('Sem renda fixa', 'muted') : h.fixed_ratio <= .35 ? st('Saudável', 'ok') : h.fixed_ratio <= .5 ? st('Atenção', 'warn') : st('Alta', 'bad');
+  const kCard = h.cards_ratio == null ? st('Sem cartões', 'muted') : h.cards_ratio <= .3 ? st('Saudável', 'ok') : h.cards_ratio <= .6 ? st('Atenção', 'warn') : st('Alta', 'bad');
+  const kAfter = h.after_invoices_cents >= 0 ? st('Positivo', 'ok') : st('Negativo', 'bad');
+  const kpis = [
+    { label: 'Taxa de poupança', value: pct(h.savings_ratio, 1), s: kSav, bar: w(h.savings_ratio), mark: '20%',
+      note: `Sobraram ${money(h.savings_cents)} dos ${money(h.income_cents)} que entraram. Referência: guardar 20%.` },
+    { label: 'Renda presa em contas fixas', value: pct(h.fixed_ratio), s: kFix, bar: w(h.fixed_ratio), mark: '50%',
+      note: `${money(h.fixed_expense_cents)} de contas fixas para ${money(h.fixed_income_cents)} de renda fixa. Acima de 50% aperta.` },
+    { label: 'Limite dos cartões em uso', value: pct(h.cards_ratio), s: kCard, bar: w(h.cards_ratio), mark: '30%',
+      note: `${money(h.cards_used_cents)} de ${money(h.cards_limit_cents)} nos cartões. Até 30% é confortável.` },
+    { label: 'Fôlego depois das faturas', value: money(h.after_invoices_cents), s: kAfter, bar: w(s.forecast_cents > 0 ? h.after_invoices_cents / s.forecast_cents : 0), mark: null,
+      note: 'Saldo previsto no fim do mês menos as faturas a pagar.' },
+  ];
+
+  // cartões: a fatura que importa agora é a fechada/atrasada; senão, a atual
+  const cards = s.cards.filter(c => !c.archived);
+  const toPay = s.invoices.filter(i => i.total_cents < 0);
+  const tierColor = { gold: '#C99A3B', platinum: '#8E9AA0', black: '#2B2D2E', nanquim: '#2B2D2E', infinite: '#23324D', signature: '#5A2A3A', grafite: '#5D6266', ultravioleta: '#6B2BD1' };
+  const cardTile = c => {
+    const inv = s.invoices.find(i => i.card_id === c.id && ['fechada', 'atrasada'].includes(i.state)) || s.invoices.find(i => i.card_id === c.id && i.due === c.current_due) || { due: c.current_due, total_cents: c.current_cents, state: 'aberta' };
+    const color = (c.tier && tierColor[norm(c.tier).replace(/[^a-z]/g, '')]) || c.color || '#557063';
+    const used = c.limit_cents ? Math.min(100, Math.max(0, -c.open_cents / c.limit_cents * 100)) : 0;
+    const pill = { fechada: ['Fechada', 'warn'], atrasada: ['Atrasada', 'bad'], aberta: ['Aberta', 'muted'], futura: ['Futura', 'muted'], paga: ['Paga', 'ok'] }[inv.state] || ['Aberta', 'muted'];
+    return `<a class="vg-cardtile" href="#cartoes" onclick="S.card=${c.id};S.due='${inv.due}'">
+      <div class="vg-ct-head"><span class="vg-ct-chip" style="background:${esc(color)}"></span><div><b>${esc(c.name)}</b>${cardKind(c) ? `<small>${esc(cardKind(c))}</small>` : ''}</div><span class="vg-pill ${pill[1]}">${pill[0]}</span></div>
+      <div class="vg-ct-mid"><span>Vence ${brShort(inv.due)}${inv.grace_days ? ` <em>(paga até ${brShort(inv.pay_until)})</em>` : ''}</span><b class="dsp num">${money(Math.abs(inv.total_cents || 0))}</b></div>
+      <div class="vg-bar thin"><i style="width:${used}%;background:${esc(color)}"></i></div>
+      <div class="vg-ct-foot num"><b>${money(c.available_cents)}</b> livre de ${money(c.limit_cents)}</div></a>`;
+  };
+
+  // avisos
+  const alerts = s.invoices.filter(i => ['fechada', 'atrasada'].includes(i.state) && i.total_cents < 0).map(i => `
+    <div class="vg-alert ${i.state === 'atrasada' ? 'bad' : 'warn'}"><span class="vg-alert-ico">${svgP(i.state === 'atrasada' ? P.bell : 'M12 8v5M12 16.5h.01M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z')}</span>
+      <div><b>Fatura do ${esc(i.card)} ${i.state}</b><span>${money(-i.total_cents)}, vence ${wdDate(i.due)}${i.grace_days ? `; pode pagar até ${brShort(i.pay_until)}` : ''}</span></div>
+      <button class="btn primary sm" onclick="openPayInvoice(${i.card_id},'${i.due}',${i.total_cents})">Pagar</button></div>`);
+  if (s.launched_today === 0) alerts.push(`<div class="vg-alert"><span class="vg-alert-ico ok">${svgP('M4 20h4L19 9l-4-4L4 16z')}</span>
+      <div><b>Nada lançado hoje</b><span>Leva um minuto</span></div><button class="btn sm" onclick="openTx()">Lançar</button></div>`);
+
+  // para onde foi
+  const exp = s.month.by_category;
+  const totalExp = -exp.reduce((a, c) => a + c.total, 0);
+  const top = exp.slice(0, 6), restList = exp.slice(6), rest = -restList.reduce((a, c) => a + c.total, 0);
+  const cats = [...top.map(c => ({ name: c.name, color: c.color || '#8a958f', v: -c.total })), ...(rest ? [{ name: `Outras (${restList.length})`, color: '#c7d0cb', v: rest }] : [])];
+  const up = s.upcoming;
+
   $('#main').innerHTML = `
-    <section class="hero">
-      <div class="hero-top"><span class="hero-date">${hello}. ${cap(today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
-        <button class="btn light sm" onclick="openTx()">${I.plus}Novo lançamento</button></div>
-      <div class="hero-body">
-        <div><div class="hero-label">Saldo em contas</div>
-          <div class="hero-value">${heroMoney(s.balance_cents)}</div>
-          <div class="hero-foot">Previsto para o fim do mês: <b>${money(s.forecast_cents)}</b></div></div>
-        <div class="hero-tiles">
-          <div class="tile warn"><span>Faturas a pagar</span><b>${money(Math.abs(s.invoices_cents))}</b><small>${closed.length ? `${closed.length} já fechada${closed.length > 1 ? 's' : ''}` : `${s.invoices.length} em aberto`}</small></div>
-          <div class="tile"><span>Entrou em ${today.toLocaleDateString('pt-BR', { month: 'long' })}</span><b>${money(s.month.income_cents)}</b><small>receitas do mês</small></div>
-          <div class="tile"><span>Saiu em ${today.toLocaleDateString('pt-BR', { month: 'long' })}</span><b>${money(Math.abs(s.month.expense_cents))}</b><small>sobra ${money(s.month.result_cents)}</small></div>
-        </div>
+    <header class="vg-head"><div><div class="muted">${cap(today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }))}</div><h1 class="dsp">${hello}</h1></div>
+      <button class="btn primary" onclick="openTx()">${I.plus}Novo lançamento</button></header>
+
+    <section class="vg-top">
+      <div class="vg-cedula">
+        <div class="vg-row"><span>Saldo em contas</span><a href="#config">Ver ${s.accounts.length} conta${s.accounts.length === 1 ? '' : 's'}</a></div>
+        <div><div class="vg-saldo dsp num">${heroMoney(s.balance_cents)}</div>
+        <div class="vg-prev">Previsto no fim do mês <b class="num">${money(s.forecast_cents)}</b></div></div>
+      </div>
+      <div class="vg-month">
+        <div class="muted">${cap(mes)} até agora</div>
+        <div class="vg-kv"><span>Entrou</span><b class="num pos">${money(s.month.income_cents)}</b></div>
+        <div class="vg-kv"><span>Saiu</span><b class="num neg">${money(-s.month.expense_cents)}</b></div>
+        <div class="vg-bar"><i style="width:${w(spent)};background:var(--red)"></i></div>
+        <div class="muted small">${spent == null ? 'Sem entradas neste mês' : `Você gastou ${pct(spent)} do que entrou`}</div>
+        <div class="vg-kv vg-sobra"><span>Sobra</span><b class="dsp num">${money(s.month.result_cents)}</b></div>
       </div>
     </section>
-    ${s.launched_today === 0 ? `<div class="nudge"><span class="ico">${svgP(P.bell)}</span>
-      <p>Nada lançado hoje ainda<span>Registrar os gastos do dia leva um minuto e mantém o saldo confiável.</span></p>
-      <button class="btn primary sm" onclick="openTx()">${I.plus}Lançar agora</button></div>` : ''}
-    ${cards.length ? `<div class="plastics">${cards.map(c => plastic(c, s.invoices.find(i => i.card_id === c.id && ['fechada', 'atrasada'].includes(i.state)))).join('')}</div>` : ''}
-    <div class="grid split">
-      <div class="card"><div class="panel-head"><h2>Próximos 15 dias</h2><span class="hint">${s.upcoming.length} ${s.upcoming.length === 1 ? 'item' : 'itens'}</span></div><div class="list">
-        ${s.upcoming.length ? s.upcoming.map(u => {
-          const d = D(u.date);
-          const ic = u.type === 'fatura' ? `<span class="cico" style="--c:${esc(u.color || '#0a6a4f')}">${svgP(P.card)}</span>` : chip(cat(u.category_id));
-          return `<div class="row up">
-            ${ic}
-            <div style="min-width:0"><div class="t">${esc(u.description)}</div>
-              <div class="s"><span class="${u.overdue ? 'neg' : ''}" style="font-weight:650">${u.overdue ? 'Venceu ' : ''}${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '')}</span><span>${esc(u.account)}</span>${u.overdue ? '<span class="pill late">atrasada</span>' : ''}${u.type === 'fatura' && u.state === 'fechada' ? '<span class="pill warn">fechada</span>' : ''}${u.type === 'fatura' && u.state === 'aberta' ? '<span class="pill info">aberta</span>' : ''}${!u.overdue && u.grace_days ? `<span class="pill">${graceTxt(u.date, u.pay_until)}</span>` : ''}</div></div>
-            <div class="money ${cls(u.amount_cents)}">${money(u.amount_cents)}</div>
-            <div>${u.type === 'fatura'
-              ? `<button class="btn sm" onclick="openPayInvoice(${u.card_id},'${u.date}',${u.amount_cents})">Pagar</button>`
-              : `<button class="btn sm" onclick="togglePaid(${u.id},1)">${u.amount_cents < 0 ? 'Pagar' : 'Receber'}</button>`}</div>
-          </div>`; }).join('') : '<div class="empty">Nada vencendo nos próximos 15 dias.</div>'}
-      </div></div>
-      <div class="grid" style="align-content:start">
-        <div class="card"><div class="panel-head"><h2>Gastos de ${today.toLocaleDateString('pt-BR', { month: 'long' })}</h2><a href="#relatorios">Relatórios</a></div>
-          ${exp.length ? `<div class="donut-wrap">${donut(pieItems, totalExp, 'gasto no mês')}
-            <div class="list legend-list">${top.map(c => `<div class="row">${chip(cat(c.id), 'sm')}<div class="t" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</div><div class="money">${money(c.total).replace('-', '')}<span class="pct">${Math.round(-c.total / totalExp * 100)}%</span></div></div>`).join('')}</div></div>`
-            : '<div class="empty">Sem despesas neste mês.</div>'}
-        </div>
-        <div class="card"><div class="panel-head"><h2>Contas</h2><a href="#config">Gerenciar</a></div><div class="list">
-          ${s.accounts.filter(a => !a.archived).map(a => `<div class="row acc-row"><span class="cico sm round" style="--c:${esc(a.color || '#888')}">${svgP(P.bank)}</span><div class="t">${esc(a.name)}</div><div class="money ${cls(a.balance_cents)}">${money(a.balance_cents)}</div></div>`).join('')}
-        </div></div>
-      </div>
-    </div>`;
+
+    <section class="vg-health">
+      <div class="vg-sec-head"><h2 class="dsp">Saúde financeira</h2><span class="muted small">${mes}, até dia ${today.getDate()}</span></div>
+      <div class="vg-kpis">${kpis.map(k => `<div class="vg-kpi">
+        <div class="vg-row"><span class="muted small">${k.label}</span><span class="vg-pill ${k.s.tone}">${k.s.label}</span></div>
+        <div class="vg-kpi-v dsp num">${k.value}</div>
+        <div class="vg-bar thin vg-mark"><i style="width:${k.bar};background:${k.s.tone === 'bad' ? 'var(--red)' : k.s.tone === 'warn' ? '#d98a1c' : 'var(--em-600)'}"></i>${k.mark ? `<s style="left:${k.mark}"></s>` : ''}</div>
+        <div class="muted small">${k.note}</div></div>`).join('')}</div>
+    </section>
+
+    ${alerts.length ? `<section class="vg-alerts">${alerts.join('')}</section>` : ''}
+
+    ${cards.length ? `<section class="vg-cards card">
+      <div class="vg-sec-head"><h2 class="dsp">Cartões</h2>${toPay.length ? `<span class="muted small num">${money(-toPay.reduce((a, i) => a + i.total_cents, 0))} a pagar em ${toPay.length} fatura${toPay.length > 1 ? 's' : ''}</span>` : ''}<a href="#cartoes">Ver faturas</a></div>
+      <div class="vg-cardgrid">${cards.map(cardTile).join('')}</div></section>` : ''}
+
+    <section class="vg-bottom">
+      <div class="card vg-up"><div class="vg-sec-head"><h2 class="dsp">Próximos 15 dias</h2><a href="#lancamentos">${up.length} ${up.length === 1 ? 'item' : 'itens'}</a></div>
+        ${up.length ? up.map(u => { const d = D(u.date); return `<div class="vg-uprow">
+          <div class="vg-day ${u.overdue ? 'neg' : ''}"><b class="num">${String(d.getDate()).padStart(2, '0')}</b><span>${d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</span></div>
+          <div class="vg-up-t"><div>${esc(u.description)}</div><span>${u.overdue ? '<em class="neg">Atrasada</em>, ' : ''}${u.type === 'fatura' ? cap(u.state) : esc(u.account)}${!u.overdue && u.grace_days ? `, pode pagar até ${brShort(u.pay_until)}` : ''}</span></div>
+          <b class="num ${u.amount_cents > 0 ? 'pos' : ''}">${u.amount_cents > 0 ? '+ ' : '− '}${money(Math.abs(u.amount_cents))}</b>
+          ${u.type === 'fatura' ? `<button class="btn sm" onclick="openPayInvoice(${u.card_id},'${u.date}',${u.amount_cents})">Pagar</button>` : `<button class="btn sm" onclick="togglePaid(${u.id},1)">${u.amount_cents < 0 ? 'Pagar' : 'Receber'}</button>`}</div>`; }).join('')
+          : '<div class="empty">Nada vencendo nos próximos 15 dias.</div>'}</div>
+      <div class="card vg-where"><div class="vg-sec-head"><h2 class="dsp">Para onde foi</h2><a href="#relatorios">Relatórios</a></div>
+        ${cats.length ? `<div class="vg-where-total dsp num">${money(totalExp)} <span class="muted">em ${mes}</span></div>
+        <div class="vg-stack">${cats.map(c => `<i style="width:${c.v / totalExp * 100}%;background:${esc(c.color)}" title="${esc(c.name)}"></i>`).join('')}</div>
+        ${cats.map(c => `<div class="vg-cat"><span style="background:${esc(c.color)}"></span><span>${esc(c.name)}</span><em class="num">${Math.round(c.v / totalExp * 100)}%</em><b class="num">${money(c.v)}</b></div>`).join('')}`
+        : '<div class="empty">Sem despesas neste mês.</div>'}</div>
+    </section>`;
 }
 
 async function togglePaid(id, paid) {
@@ -728,8 +802,8 @@ async function pageRel() {
       <div class="card"><div class="panel-head"><h2>Para onde foi o dinheiro</h2></div>
         ${pie.length ? `<div style="display:grid;place-items:center;margin:4px 0 8px">${donut(pie, pie.reduce((a, x) => a + x.value, 0), 'despesas')}</div>` : ''}
         <table><thead><tr><th>Categoria</th><th class="money">Valor</th><th class="money">vs. mês anterior</th></tr></thead><tbody>
-        ${rowsC.map(([id, v]) => { const c = cat(+id); const p = prevCat[id] || 0; const diff = p ? Math.round((v / p - 1) * 100) : null;
-          return `<tr><td><span class="tdcat">${c ? chip(c, 'sm') : chip(null, 'sm')}<span>${esc(c?.name || 'Sem categoria')}<br><span class="muted small">${Math.round(v / tot * 100)}% do mês</span></span></span></td><td class="money">${money(v).replace('-', '')}</td><td class="money">${diff === null ? '<span class="muted small">novo</span>' : `<span class="pill ${diff > 10 ? 'late' : diff < -10 ? 'ok' : ''}">${diff > 0 ? '+' : ''}${diff}%</span>`}</td></tr>`; }).join('') || '<tr><td colspan="3" class="empty">Sem despesas.</td></tr>'}
+        ${rowsC.map(([id, v], ri) => { const c = cat(+id); const p = prevCat[id] || 0; const diff = p ? Math.round((v / p - 1) * 100) : null;
+          return `<tr data-seg="${Math.min(ri, 7)}"><td><span class="tdcat">${c ? chip(c, 'sm') : chip(null, 'sm')}<span>${esc(c?.name || 'Sem categoria')}<br><span class="muted small">${Math.round(v / tot * 100)}% do mês</span></span></span></td><td class="money">${money(v).replace('-', '')}</td><td class="money">${diff === null ? '<span class="muted small">novo</span>' : `<span class="pill ${diff > 10 ? 'late' : diff < -10 ? 'ok' : ''}">${diff > 0 ? '+' : ''}${diff}%</span>`}</td></tr>`; }).join('') || '<tr><td colspan="3" class="empty">Sem despesas.</td></tr>'}
         </tbody></table></div>
     </div>`;
   $$('.chart .col').forEach(c => {

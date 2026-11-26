@@ -207,3 +207,18 @@ fn folga_no_vencimento() {
     assert_eq!(i["pay_until"], "2026-12-07");
     assert_eq!(i["grace_days"], 2);
 }
+
+#[test]
+fn saude_financeira() {
+    let Some((db, _)) = db_hoje() else { return };
+    let s = api::route(&db, "GET", "summary", None).unwrap();
+    let h = &s["health"];
+    assert_eq!(h["savings_cents"], 1023153);
+    assert_eq!(h["income_cents"], 1874924);
+    assert_eq!(h["fixed_expense_cents"], 295984);
+    assert_eq!(h["fixed_income_cents"], 670598);
+    assert_eq!(h["cards_limit_cents"], 3372600);
+    assert_eq!(h["cards_used_cents"], 950168);
+    assert_eq!(h["after_invoices_cents"], 1864310 - 943772);
+    assert!((h["savings_ratio"].as_f64().unwrap() - 0.5457).abs() < 0.001);
+}
